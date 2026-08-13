@@ -1,0 +1,1 @@
+# El Contable - App web que te ayuda a gestionar tus cuentas sin morir en el intento

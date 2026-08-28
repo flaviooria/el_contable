@@ -1,2 +1,50 @@
 [tools]
 python = "3.14"
+
+[tasks.dev]
+description = "Start the FastAPI development server"
+run = "uv run fastapi dev src/el_contable/main.py"
+
+[tasks.lint]
+description = "Run ruff linting"
+run = "uv run ruff check ."
+
+[tasks.format]
+description = "Format code with ruff"
+run = "uv run ruff format ."
+
+[tasks.format-check]
+description = "Check code formatting with ruff"
+run = "uv run ruff format --check ."
+
+[tasks.typecheck]
+description = "Run mypy static type checking"
+run = "uv run mypy src"
+
+[tasks.test]
+description = "Run the test suite"
+run = "uv run pytest"
+
+[tasks.checks]
+description = "Run the complete validation suite (lint, formatting, type checking, tests)"
+run = "uv run ruff check . && uv run ruff format --check . && uv run mypy src"
+
+[tasks.migrate]
+description = "Apply database migrations"
+run = "uv run alembic upgrade head"
+
+[tasks.revision]
+description = "Generate a new migration with the given message (mise run revision -- Message)"
+run = "uv run alembic revision --autogenerate -m \"$MESSAGE\""
+
+[tasks.downgrade]
+description = "Revert the last database migration"
+run = "uv run alembic downgrade -1"
+
+[tasks.db-up]
+description = "Start the PostgreSQL container"
+run = "docker compose up -d"
+
+[tasks.db-down]
+description = "Stop the PostgreSQL container"
+run = "docker compose down"

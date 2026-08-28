@@ -6,9 +6,22 @@ readme = "README.md"
 authors = [
     { name = "Flavio Oria", email = "flavio.oriap@gmail.com" }
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi[standard]",
+    "sqlalchemy",
+    "polars",
+    "openpyxl",
+    "psycopg[binary]",
+    "fastexcel==0.21.0",
+    "alembic>=1.19.1",
+]
+
+[dependency-groups]
+dev = [
+    "ruff",
+    "mypy",
+    "pytest",
 ]
 
 [project.scripts]
@@ -17,3 +30,34 @@ el-contable = "el_contable:main"
 [build-system]
 requires = ["uv_build>=0.12.3,<0.13.0"]
 build-backend = "uv_build"
+
+[tool.ruff]
+# Same as Black.
+line-length = 100
+indent-width = 4
+
+# Nota: Ya no hace falta la lista gigante de 'exclude',
+# Ruff ignora .git, .venv, venv, build, dist, etc., de forma nativa.
+
+[tool.ruff.lint]
+# Movido aquí para solucionar el warning
+fixable = ["ALL"]
+
+# 1. Enable flake8-bugbear (`B`) rules, in addition to the defaults.
+select = ["E4", "E7", "E9", "F", "B"]
+
+# 2. Avoid enforcing line-length violations (`E501`)
+ignore = ["E501"]
+
+# 3. Avoid trying to fix flake8-bugbear (`B`) violations.
+unfixable = ["B"]
+
+[tool.ruff.lint.per-file-ignores]
+# Añadimos "F401" aquí para que no te vuelva a molestar con los imports sin usar en los __init__.py
+"__init__.py" = ["E402", "F401"]
+"**/{tests,docs,tools}/*" = ["E402"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+pythonpath = ["src"]

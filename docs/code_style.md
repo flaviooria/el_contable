@@ -190,6 +190,8 @@ Do not use:
 - Keep feature-specific persistence logic inside the feature that owns the data whenever possible.
 - Do not accumulate feature-specific queries inside shared database infrastructure.
 - Keep transaction boundaries explicit.
+- Services use `flush()` to validate and persist within a transaction, but do not commit. This keeps them testable and reusable.
+- The router (FastAPI endpoint) is the proper place to call `commit()` after a service operation succeeds. If the operation fails, the router should not commit.
 - Avoid hidden commits inside low-level persistence functions unless committing is explicitly part of their contract.
 
 ## 🔄 Models and Schemas

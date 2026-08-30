@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
@@ -25,10 +26,12 @@ class MovementsService:
         parser: MovementsParser,
         validator: MovementsValidator,
         db: Session,
+        account_id: uuid.UUID,
     ):
         self.parser = parser
         self.validator = validator
         self.db = db
+        self.account_id = account_id
 
     def upload(self, file_content: bytes, filename: str) -> UploadResponse:
         rows = self.parser.parse(file_content, filename)
@@ -64,6 +67,7 @@ class MovementsService:
             )
 
             movement = Movement(
+                account_id=self.account_id,
                 fecha_movimiento=movement_create.fecha_movimiento,
                 concepto=movement_create.concepto,
                 importe=movement_create.importe,
@@ -77,7 +81,7 @@ class MovementsService:
             inserted_movements.append(MovementResponse.model_validate(movement))
 
         balance_service = AccountBalanceService(self.db)
-        balance_service.upsert_balance(available_balance)
+        balance_service.upsert_balance(self.account_id, available_balance)
 
         self.db.commit()
 
@@ -111,8 +115,10 @@ class MovementsService:
         fechas = [r.fecha_movimiento for r in rows if r.fecha_movimiento is not None]
         if not fechas:
             return set()
-        stmt = select(Movement.fecha_movimiento, Movement.importe, Movement.disponible).where(
-            Movement.fecha_movimiento.in_(fechas)
+        stmt = (
+            select(Movement.fecha_movimiento, Movement.importe, Movement.disponible)
+            .where(Movement.account_id == self.account_id)
+            .where(Movement.fecha_movimiento.in_(fechas))
         )
         result = self.db.execute(stmt).all()
         keys: set[tuple] = set()
@@ -124,7 +130,7 @@ class MovementsService:
         return keys
 
     def _get_stored_balance(self) -> float | None:
-        return AccountBalanceService(self.db).get_balance()
+        return AccountBalanceService(self.db).get_balance(self.account_id)
 
     @staticmethod
     def get_template_path() -> str:
@@ -134,7 +140,10 @@ class MovementsService:
 DatabaseSession = Annotated[Session, Depends(get_db)]
 
 
-def get_movements_service(db: DatabaseSession) -> MovementsService:
+def get_movements_service(
+    db: DatabaseSession,
+    account_id: uuid.UUID,
+) -> MovementsService:
     parser = MovementsParser()
     validator = MovementsValidator()
-    return MovementsService(parser=parser, validator=validator, db=db)
+    return MovementsService(parser=parser, validator=validator, db=db, account_id=account_id)

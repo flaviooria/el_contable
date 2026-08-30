@@ -11,3 +11,6 @@ wheels/
 
 # IDE
 .idea/
+
+# Local test data
+movements_files/

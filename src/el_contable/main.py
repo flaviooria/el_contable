@@ -1,9 +1,11 @@
 from fastapi import FastAPI
 
+from el_contable.features.accounts.router import router as accounts_router
 from el_contable.features.movements.router import router as movements_router
 
 app = FastAPI()
 
+app.include_router(accounts_router)
 app.include_router(movements_router)
 
 

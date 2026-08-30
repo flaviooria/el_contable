@@ -1,7 +1,8 @@
+import uuid
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 
 from el_contable.features.movements.parser import ParserError
@@ -19,10 +20,8 @@ router = APIRouter(prefix="/api/v1/movements", tags=["movements"])
     response_class=FileResponse,
     summary="Download movements template",
 )
-async def download_template(
-    service: Annotated[MovementsService, Depends(get_movements_service)],
-) -> FileResponse:
-    template_path = Path(service.get_template_path())
+async def download_template() -> FileResponse:
+    template_path = Path("src/el_contable/templates/plantilla_movimientos.xlsx")
 
     if not template_path.exists():
         raise HTTPException(
@@ -52,6 +51,7 @@ ALLOWED_EXTENSIONS = {".xlsx", ".csv"}
 )
 async def upload_movements(
     file: Annotated[UploadFile, File(description="Excel or CSV file with movements")],
+    account_id: Annotated[uuid.UUID, Query(description="Account ID for this upload")],
     service: Annotated[MovementsService, Depends(get_movements_service)],
 ) -> UploadResponse:
     filename = file.filename or ""

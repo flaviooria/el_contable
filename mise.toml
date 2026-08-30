@@ -29,6 +29,11 @@ run = "uv run pytest"
 description = "Run the complete validation suite (lint, formatting, type checking, tests)"
 run = "uv run ruff check . && uv run ruff format --check . && uv run mypy src"
 
+[tasks.generate_migration]
+description = "Generate a new migration with the given message"
+usage = "arg <MESSAGE> help=\"The message for the migration\""
+run = "uv run alembic revision --autogenerate -m \"$MESSAGE\""
+
 [tasks.migrate]
 description = "Apply database migrations"
 run = "uv run alembic upgrade head"

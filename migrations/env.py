@@ -5,7 +5,10 @@ from sqlalchemy import pool
 
 from alembic import context
 
-from el_contable.features.movements.models import Base
+from el_contable.database import Base
+from el_contable.features.accounts.models import Account, PiggyBank, MovementPiggyBank  # noqa: F401
+from el_contable.features.account_balance.models import AccountBalance  # noqa: F401
+from el_contable.features.movements.models import Movement  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

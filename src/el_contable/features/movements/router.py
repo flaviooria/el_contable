@@ -6,7 +6,11 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from fastapi.responses import FileResponse
 
 from el_contable.features.movements.parser import ParserError
-from el_contable.features.movements.schemas import UploadError, UploadResponse
+from el_contable.features.movements.schemas import (
+    MovementTotalsResponse,
+    UploadError,
+    UploadResponse,
+)
 from el_contable.features.movements.service import (
     MovementsService,
     get_movements_service,
@@ -69,5 +73,27 @@ async def upload_movements(
     except ParserError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+
+
+@router.get(
+    "/totals",
+    response_model=MovementTotalsResponse,
+    summary="Get movement totals by type for an account",
+    responses={
+        404: {"description": "Account not found"},
+        422: {"description": "Validation error"},
+    },
+)
+async def get_movement_totals(
+    account_id: Annotated[uuid.UUID, Query(description="Account ID")],
+    service: Annotated[MovementsService, Depends(get_movements_service)],
+) -> MovementTotalsResponse:
+    try:
+        return service.get_totals(account_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e),
         ) from e

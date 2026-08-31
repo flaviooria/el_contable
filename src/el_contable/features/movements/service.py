@@ -3,18 +3,21 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from el_contable.database import get_db
 from el_contable.features.account_balance.service import AccountBalanceService
+from el_contable.features.accounts.models import Account
 from el_contable.features.movements.models import Movement
 from el_contable.features.movements.parser import MovementsParser
 from el_contable.features.movements.schemas import (
     MovementCreate,
     MovementResponse,
     MovementRow,
+    MovementTotalsResponse,
     MovementType,
+    MovementTypeTotals,
     UploadResponse,
 )
 from el_contable.features.movements.validator import MovementsValidator
@@ -26,7 +29,7 @@ class MovementsService:
         parser: MovementsParser,
         validator: MovementsValidator,
         db: Session,
-        account_id: uuid.UUID,
+        account_id: uuid.UUID | None = None,
     ):
         self.parser = parser
         self.validator = validator
@@ -34,6 +37,7 @@ class MovementsService:
         self.account_id = account_id
 
     def upload(self, file_content: bytes, filename: str) -> UploadResponse:
+        assert self.account_id is not None, "account_id is required for upload"
         rows = self.parser.parse(file_content, filename)
 
         valid_rows = [r for r in rows if r.is_valid]
@@ -130,11 +134,64 @@ class MovementsService:
         return keys
 
     def _get_stored_balance(self) -> float | None:
+        if self.account_id is None:
+            return None
         return AccountBalanceService(self.db).get_balance(self.account_id)
 
     @staticmethod
     def get_template_path() -> str:
         return "src/el_contable/templates/plantilla_movimientos.xlsx"
+
+    def get_totals(self, account_id: uuid.UUID) -> MovementTotalsResponse:
+        """Get accumulated movement amounts grouped by type for an account.
+
+        Args:
+            account_id: The UUID of the account to get totals for.
+
+        Returns:
+            MovementTotalsResponse with totals grouped by movement type.
+
+        Raises:
+            ValueError: If the account does not exist.
+        """
+        account_exists = self.db.execute(
+            select(func.count()).select_from(Account).where(Account.id == account_id)
+        ).scalar_one()
+
+        if account_exists == 0:
+            raise ValueError("Account not found")
+
+        stmt = (
+            select(
+                Movement.tipo,
+                func.sum(Movement.importe).label("total_amount"),
+                func.count().label("movement_count"),
+            )
+            .where(Movement.account_id == account_id)
+            .group_by(Movement.tipo)
+        )
+        results = self.db.execute(stmt).all()
+
+        totals_by_type: dict[MovementType, MovementTypeTotals] = {}
+        for row in results:
+            totals_by_type[row.tipo] = MovementTypeTotals(
+                type=row.tipo,
+                total_amount=row.total_amount or 0.0,
+                count=row.movement_count,
+            )
+
+        all_types = [MovementType.INGRESO, MovementType.GASTO]
+        for movement_type in all_types:
+            if movement_type not in totals_by_type:
+                totals_by_type[movement_type] = MovementTypeTotals(
+                    type=movement_type,
+                    total_amount=0.0,
+                    count=0,
+                )
+
+        sorted_totals = [totals_by_type[t] for t in all_types]
+
+        return MovementTotalsResponse(account_id=account_id, totals=sorted_totals)
 
 
 DatabaseSession = Annotated[Session, Depends(get_db)]
@@ -142,7 +199,7 @@ DatabaseSession = Annotated[Session, Depends(get_db)]
 
 def get_movements_service(
     db: DatabaseSession,
-    account_id: uuid.UUID,
+    account_id: uuid.UUID | None = None,
 ) -> MovementsService:
     parser = MovementsParser()
     validator = MovementsValidator()

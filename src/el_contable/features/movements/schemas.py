@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime
 from enum import Enum
 
@@ -50,3 +51,14 @@ class UploadResponse(BaseModel):
 class UploadError(BaseModel):
     detail: str
     errors: list[str] | None = None
+
+
+class MovementTypeTotals(BaseModel):
+    type: MovementType
+    total_amount: float
+    count: int
+
+
+class MovementTotalsResponse(BaseModel):
+    account_id: uuid.UUID
+    totals: list[MovementTypeTotals]

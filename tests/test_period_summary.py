@@ -80,11 +80,11 @@ def test_period_summary_returns_correct_totals(db_session) -> None:
         concepto="Freelance payment",
         disponible=1200.0,
     )
-    # Expense in period
+    # Expense in period (negative importe per DB convention)
     create_movement(
         db_session,
         account_id,
-        150.0,
+        -150.0,
         MovementType.GASTO,
         fecha=datetime(2024, 1, 20, 12, 0, tzinfo=timezone.utc),
         concepto="Groceries",
@@ -177,7 +177,7 @@ def test_period_summary_open_ended_period(db_session) -> None:
     create_movement(
         db_session,
         account_id,
-        50.0,
+        -50.0,
         MovementType.GASTO,
         fecha=datetime(2024, 2, 10, 0, 0, tzinfo=timezone.utc),
         concepto="Some expense",
@@ -208,11 +208,11 @@ def test_period_summary_bounded_by_next_nomina(db_session) -> None:
         concepto="Nómina",
         disponible=1000.0,
     )
-    # Movement in period
+    # Movement in period (negative importe per DB convention)
     create_movement(
         db_session,
         account_id,
-        200.0,
+        -200.0,
         MovementType.GASTO,
         fecha=datetime(2024, 1, 15, 0, 0, tzinfo=timezone.utc),
         concepto="Groceries",
@@ -232,7 +232,7 @@ def test_period_summary_bounded_by_next_nomina(db_session) -> None:
     create_movement(
         db_session,
         account_id,
-        300.0,
+        -300.0,
         MovementType.GASTO,
         fecha=datetime(2024, 2, 5, 0, 0, tzinfo=timezone.utc),
         concepto="Other expense",
@@ -280,6 +280,111 @@ def test_period_summary_nomina_without_accent(db_session) -> None:
     result = service.get_period_summary(account_id, start)
 
     assert result.period_end == date(2024, 2, 1)
+
+
+def test_period_summary_rounds_monetary_values(db_session) -> None:
+    """All monetary values are rounded to 2 decimals to eliminate float noise."""
+    account_id = create_account(db_session)
+    start = date(2024, 1, 1)
+
+    # Expense with float precision noise: -3232.239999999999 rounds to 3232.24
+    create_movement(
+        db_session,
+        account_id,
+        1000.0,
+        MovementType.INGRESO,
+        fecha=datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc),
+        concepto="Nómina",
+        disponible=1000.0,
+    )
+    create_movement(
+        db_session,
+        account_id,
+        -3232.239999999999,
+        MovementType.GASTO,
+        fecha=datetime(2024, 1, 15, 0, 0, tzinfo=timezone.utc),
+        concepto="Big expense",
+        disponible=-2232.239999999999,
+    )
+    db_session.commit()
+
+    service = make_service(db_session)
+    result = service.get_period_summary(account_id, start)
+
+    # income_total excludes start-date nómina = 0.0
+    assert result.income_total == 0.0
+    # expense_total should be the absolute sum rounded to 2 decimals
+    assert result.expense_total == 3232.24
+    # remaining_balance should be rounded to 2 decimals
+    assert result.remaining_balance == -2232.24
+
+
+def test_period_summary_same_day_as_closing_nomina(db_session) -> None:
+    """A movement on the same calendar day as the closing nómina but chronologically
+    before the salary credit IS included in the period.
+
+    The service orders movements by (fecha_movimiento ASC, id DESC) so that for
+    identical timestamps, a higher id = earlier-in-day row. Therefore create the
+    closing nómina FIRST (lower id) and the same-day income SECOND (higher id).
+    """
+    account_id = create_account(db_session)
+    start = date(2024, 2, 1)
+
+    # Feb 1: start-date salary (excluded from income)
+    create_movement(
+        db_session,
+        account_id,
+        1000.0,
+        MovementType.INGRESO,
+        fecha=datetime(2024, 2, 1, 0, 0, tzinfo=timezone.utc),
+        concepto="Nómina February",
+        disponible=1000.0,
+    )
+    # Feb 10: gasto (disponible after: 600.0)
+    create_movement(
+        db_session,
+        account_id,
+        -400.0,
+        MovementType.GASTO,
+        fecha=datetime(2024, 2, 10, 0, 0, tzinfo=timezone.utc),
+        concepto="Groceries",
+        disponible=600.0,
+    )
+    # Mar 1: closing nómina FIRST (lower id = later chronologically)
+    create_movement(
+        db_session,
+        account_id,
+        1000.0,
+        MovementType.INGRESO,
+        fecha=datetime(2024, 3, 1, 11, 0, tzinfo=timezone.utc),
+        concepto="Nómina March",
+        disponible=1600.0,
+    )
+    # Mar 1: same-day income SECOND (higher id = earlier chronologically, before salary)
+    # This income is chronologically before the closing nómina, so it is included.
+    create_movement(
+        db_session,
+        account_id,
+        591.11,
+        MovementType.INGRESO,
+        fecha=datetime(2024, 3, 1, 10, 0, tzinfo=timezone.utc),
+        concepto="Refund",
+        disponible=591.11,
+    )
+    db_session.commit()
+
+    service = make_service(db_session)
+    result = service.get_period_summary(account_id, start)
+
+    assert result.period_end == date(2024, 3, 1)
+    # remaining_balance is the disponible of the last movement before the closing nómina
+    assert result.remaining_balance == 591.11
+    # income_total includes the same-day income (591.11), excludes start-date nómina
+    assert result.income_total == 591.11
+    # expense_total is the absolute sum
+    assert result.expense_total == 400.0
+    assert result.income_count == 1
+    assert result.expense_count == 1
 
 
 def test_period_summary_raises_error_for_nonexistent_account(db_session) -> None:

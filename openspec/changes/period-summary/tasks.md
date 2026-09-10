@@ -24,5 +24,12 @@
 - [x] 4.7 Test endpoint returns 422 when account_id is missing
 - [x] 4.8 Test endpoint returns 422 when start_date is missing
 
-## 5. Validation
-- [x] 5.1 Run `make checks` and resolve all failures
+## 5. Expense sign, rounding, and remaining_balance fixes
+- [x] 5.1 Report expense_total as a positive number (absolute sum of gasto importes)
+- [x] 5.2 Round income_total, expense_total, and remaining_balance to 2 decimals
+- [x] 5.3 Use the closing nómina's exact fecha_movimiento as the exclusive period end (not the start of its day), so same-day-before-salary movements are included
+- [x] 5.4 Keep remaining_balance as the disponible of the last movement chronologically before the closing nómina
+- [x] 5.5 Update/extend tests: positive expense_total, rounding, same-day-as-nómina movement included and feeds remaining_balance
+
+## 6. Validation
+- [x] 6.1 Run `make checks` and resolve all failures

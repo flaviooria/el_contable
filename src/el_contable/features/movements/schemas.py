@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -62,3 +62,14 @@ class MovementTypeTotals(BaseModel):
 class MovementTotalsResponse(BaseModel):
     account_id: uuid.UUID
     totals: list[MovementTypeTotals]
+
+
+class PeriodSummaryResponse(BaseModel):
+    account_id: uuid.UUID
+    period_start: date
+    period_end: date | None
+    income_total: float
+    expense_total: float
+    remaining_balance: float
+    income_count: int
+    expense_count: int

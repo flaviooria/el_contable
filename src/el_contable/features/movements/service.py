@@ -1,5 +1,6 @@
+import unicodedata
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import Depends
@@ -18,6 +19,7 @@ from el_contable.features.movements.schemas import (
     MovementTotalsResponse,
     MovementType,
     MovementTypeTotals,
+    PeriodSummaryResponse,
     UploadResponse,
 )
 from el_contable.features.movements.validator import MovementsValidator
@@ -192,6 +194,118 @@ class MovementsService:
         sorted_totals = [totals_by_type[t] for t in all_types]
 
         return MovementTotalsResponse(account_id=account_id, totals=sorted_totals)
+
+    def get_period_summary(
+        self,
+        account_id: uuid.UUID,
+        start_date: date,
+    ) -> PeriodSummaryResponse:
+        """Get accumulated income, expenses, and balance for a pay period.
+
+        The period starts on start_date and ends on the date of the next movement
+        whose normalized concepto contains "nomina" (exclusive end boundary).
+        If no such movement exists, the period is open-ended (period_end is null).
+
+        The salary movement at start_date is excluded from income totals.
+
+        Args:
+            account_id: The UUID of the account.
+            start_date: The start date of the period.
+
+        Returns:
+            PeriodSummaryResponse with income/expense totals and remaining balance.
+
+        Raises:
+            ValueError: If the account does not exist.
+        """
+        account_exists = self.db.execute(
+            select(func.count()).select_from(Account).where(Account.id == account_id)
+        ).scalar_one()
+
+        if account_exists == 0:
+            raise ValueError("Account not found")
+
+        # Find next movement after start_date whose normalized concepto contains "nomina"
+        # Use date-only comparison: movements on dates strictly after start_date
+        next_day = datetime.combine(start_date + timedelta(days=1), datetime.min.time()).replace(
+            tzinfo=timezone.utc
+        )
+        stmt_next_nomina = (
+            select(Movement)
+            .where(Movement.account_id == account_id)
+            .where(Movement.fecha_movimiento >= next_day)
+            .order_by(Movement.fecha_movimiento)
+        )
+        all_movements = self.db.execute(stmt_next_nomina).scalars().all()
+
+        period_end: date | None = None
+        for m in all_movements:
+            if "nomina" in self._normalize_concepto(m.concepto):
+                period_end = m.fecha_movimiento.date()
+                break
+
+        # Filter movements within [start_date, period_end) excluding start_date nómina
+        start_dt = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+        query = (
+            select(Movement)
+            .where(Movement.account_id == account_id)
+            .where(Movement.fecha_movimiento >= start_dt)
+        )
+        if period_end is not None:
+            end_dt = datetime.combine(period_end, datetime.min.time()).replace(tzinfo=timezone.utc)
+            query = query.where(Movement.fecha_movimiento < end_dt)
+
+        movements_in_period = (
+            self.db.execute(query.order_by(Movement.fecha_movimiento)).scalars().all()
+        )
+
+        # Exclude the nómina at start_date from income (the period-start salary)
+        start_date_nomina = None
+        for m in movements_in_period:
+            normalized = self._normalize_concepto(m.concepto)
+            if "nomina" in normalized:
+                start_date_nomina = m
+                break
+
+        filtered_movements = (
+            [m for m in movements_in_period if m.id != start_date_nomina.id]
+            if start_date_nomina
+            else movements_in_period
+        )
+
+        income_total = 0.0
+        expense_total = 0.0
+        income_count = 0
+        expense_count = 0
+        remaining_balance = 0.0
+
+        for m in filtered_movements:
+            if m.tipo == MovementType.INGRESO:
+                income_total += m.importe
+                income_count += 1
+            elif m.tipo == MovementType.GASTO:
+                expense_total += m.importe
+                expense_count += 1
+
+        if filtered_movements:
+            remaining_balance = filtered_movements[-1].disponible
+
+        return PeriodSummaryResponse(
+            account_id=account_id,
+            period_start=start_date,
+            period_end=period_end,
+            income_total=income_total,
+            expense_total=expense_total,
+            remaining_balance=remaining_balance,
+            income_count=income_count,
+            expense_count=expense_count,
+        )
+
+    @staticmethod
+    def _normalize_concepto(concepto: str) -> str:
+        """Normalize concepto by lowercasing and stripping accents."""
+        nfkd = unicodedata.normalize("NFKD", concepto.lower())
+        return "".join(c for c in nfkd if not unicodedata.combining(c))
 
 
 DatabaseSession = Annotated[Session, Depends(get_db)]

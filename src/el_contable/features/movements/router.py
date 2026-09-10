@@ -1,4 +1,5 @@
 import uuid
+from datetime import date
 from pathlib import Path
 from typing import Annotated
 
@@ -8,6 +9,7 @@ from fastapi.responses import FileResponse
 from el_contable.features.movements.parser import ParserError
 from el_contable.features.movements.schemas import (
     MovementTotalsResponse,
+    PeriodSummaryResponse,
     UploadError,
     UploadResponse,
 )
@@ -92,6 +94,29 @@ async def get_movement_totals(
 ) -> MovementTotalsResponse:
     try:
         return service.get_totals(account_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        ) from e
+
+
+@router.get(
+    "/period-summary",
+    response_model=PeriodSummaryResponse,
+    summary="Get period summary with income, expenses, and remaining balance",
+    responses={
+        404: {"description": "Account not found"},
+        422: {"description": "Validation error"},
+    },
+)
+async def get_period_summary(
+    account_id: Annotated[uuid.UUID, Query(description="Account ID")],
+    start_date: Annotated[date, Query(description="Start date of the period (YYYY-MM-DD)")],
+    service: Annotated[MovementsService, Depends(get_movements_service)],
+) -> PeriodSummaryResponse:
+    try:
+        return service.get_period_summary(account_id, start_date)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

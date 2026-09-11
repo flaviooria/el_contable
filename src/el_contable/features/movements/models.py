@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum, Float, ForeignKey, String, func
+from sqlalchemy import DateTime, Enum, Float, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -17,6 +17,9 @@ if TYPE_CHECKING:
 
 class Movement(Base):
     __tablename__ = "movements"
+    __table_args__ = (
+        UniqueConstraint("account_id", "orden_extracto", name="uq_movements_account_orden"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     account_id: Mapped[uuid.UUID] = mapped_column(
@@ -35,6 +38,7 @@ class Movement(Base):
         default=lambda: datetime.now(timezone.utc) + timedelta(days=30),
         nullable=False,
     )
+    orden_extracto: Mapped[int] = mapped_column(Integer, nullable=False)
     account: Mapped["Account"] = relationship("Account", back_populates="movements")
     piggy_banks: Mapped[list[PiggyBank]] = relationship(
         "PiggyBank", secondary="movements_piggy_banks", back_populates="movements"

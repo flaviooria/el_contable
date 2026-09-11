@@ -33,6 +33,7 @@ def create_movement(
     importe: float,
     tipo: MovementType,
     fecha: datetime | None = None,
+    orden_extracto: int = 1,
 ) -> Movement:
     movement = Movement(
         account_id=account_id,
@@ -42,6 +43,7 @@ def create_movement(
         tipo=tipo,
         disponible=importe,
         expires_at=datetime.now(timezone.utc),
+        orden_extracto=orden_extracto,
     )
     db_session.add(movement)
     db_session.flush()
@@ -50,10 +52,10 @@ def create_movement(
 
 def test_get_totals_returns_correct_sums_for_both_types(db_session) -> None:
     account_id = create_account(db_session)
-    create_movement(db_session, account_id, 1000.0, MovementType.INGRESO)
-    create_movement(db_session, account_id, 500.0, MovementType.INGRESO)
-    create_movement(db_session, account_id, 200.0, MovementType.GASTO)
-    create_movement(db_session, account_id, 50.0, MovementType.GASTO)
+    create_movement(db_session, account_id, 1000.0, MovementType.INGRESO, orden_extracto=1)
+    create_movement(db_session, account_id, 500.0, MovementType.INGRESO, orden_extracto=2)
+    create_movement(db_session, account_id, 200.0, MovementType.GASTO, orden_extracto=3)
+    create_movement(db_session, account_id, 50.0, MovementType.GASTO, orden_extracto=4)
     db_session.commit()
 
     service = make_service(db_session)
@@ -100,8 +102,8 @@ def test_get_totals_raises_error_for_nonexistent_account(db_session) -> None:
 
 def test_get_totals_returns_only_ingreso_when_no_gastos(db_session) -> None:
     account_id = create_account(db_session)
-    create_movement(db_session, account_id, 1000.0, MovementType.INGRESO)
-    create_movement(db_session, account_id, 500.0, MovementType.INGRESO)
+    create_movement(db_session, account_id, 1000.0, MovementType.INGRESO, orden_extracto=1)
+    create_movement(db_session, account_id, 500.0, MovementType.INGRESO, orden_extracto=2)
     db_session.commit()
 
     service = make_service(db_session)
@@ -120,8 +122,8 @@ def test_get_totals_returns_only_ingreso_when_no_gastos(db_session) -> None:
 
 def test_get_totals_returns_only_gasto_when_no_ingresos(db_session) -> None:
     account_id = create_account(db_session)
-    create_movement(db_session, account_id, 200.0, MovementType.GASTO)
-    create_movement(db_session, account_id, 50.0, MovementType.GASTO)
+    create_movement(db_session, account_id, 200.0, MovementType.GASTO, orden_extracto=1)
+    create_movement(db_session, account_id, 50.0, MovementType.GASTO, orden_extracto=2)
     db_session.commit()
 
     service = make_service(db_session)

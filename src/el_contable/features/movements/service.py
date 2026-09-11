@@ -62,6 +62,9 @@ class MovementsService:
         inserted_movements: list[MovementResponse] = []
         skipped_count = len(skipped_in_db) + len(invalid_rows)
 
+        max_existing = self._get_max_orden_extracto()
+        next_orden = max_existing + len(new_rows)
+
         for row in new_rows:
             assert row.importe is not None, "Importe was validated as non-None"
             movement_create = MovementCreate(
@@ -79,8 +82,10 @@ class MovementsService:
                 importe=movement_create.importe,
                 tipo=movement_create.tipo,
                 disponible=movement_create.disponible,
+                orden_extracto=next_orden,
                 expires_at=datetime.now(timezone.utc) + timedelta(days=30),
             )
+            next_orden -= 1
 
             self.db.add(movement)
             self.db.flush()
@@ -139,6 +144,14 @@ class MovementsService:
         if self.account_id is None:
             return None
         return AccountBalanceService(self.db).get_balance(self.account_id)
+
+    def _get_max_orden_extracto(self) -> int:
+        if self.account_id is None:
+            return 0
+        stmt = select(func.coalesce(func.max(Movement.orden_extracto), 0)).where(
+            Movement.account_id == self.account_id
+        )
+        return int(self.db.execute(stmt).scalar_one())
 
     @staticmethod
     def get_template_path() -> str:
@@ -207,9 +220,8 @@ class MovementsService:
         the period is open-ended (period_end is null).
 
         The closing nómina is the first movement strictly after start_date whose
-        normalized concepto contains "nomina". Movements on the same calendar day
-        as the closing nómina are included only if they occur chronologically before
-        it (determined by id order for same-timestamp rows).
+        normalized concepto contains "nomina", ordered by orden_extracto
+        (the single source of chronological truth).
 
         The salary movement at start_date is excluded from income totals.
         Expense totals are reported as positive numbers (absolute sum).
@@ -234,8 +246,8 @@ class MovementsService:
         if account_exists == 0:
             raise ValueError("Account not found")
 
-        # Find the closing nómina: first movement after start_date whose
-        # normalized concepto contains "nomina". Keep the movement object.
+        # Find the closing nómina: first movement after start_date ordered by
+        # orden_extracto (the single source of chronological truth).
         next_day = datetime.combine(start_date + timedelta(days=1), datetime.min.time()).replace(
             tzinfo=timezone.utc
         )
@@ -243,7 +255,7 @@ class MovementsService:
             select(Movement)
             .where(Movement.account_id == account_id)
             .where(Movement.fecha_movimiento >= next_day)
-            .order_by(Movement.fecha_movimiento)
+            .order_by(Movement.orden_extracto)
         )
         all_movements = self.db.execute(stmt_next_nomina).scalars().all()
 
@@ -255,24 +267,23 @@ class MovementsService:
                 period_end = m.fecha_movimiento.date()
                 break
 
-        # Query all movements from start_date onwards, ordered chronologically.
-        # For same-timestamp rows (date-only bank exports), id DESC reconstructs
-        # statement order because later-in-day salary rows were inserted first.
+        # Query all movements from start_date onwards, ordered by orden_extracto
+        # (the single source of chronological truth).
         start_dt = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
         query = (
             select(Movement)
             .where(Movement.account_id == account_id)
             .where(Movement.fecha_movimiento >= start_dt)
-            .order_by(Movement.fecha_movimiento, Movement.id.desc())
+            .order_by(Movement.orden_extracto)
         )
         movements_in_period = self.db.execute(query).scalars().all()
 
         # If a closing nómina exists, keep only movements that precede it
-        # chronologically (break when we reach the closing nómina id).
+        # chronologically (break when we reach the closing nómina's orden_extracto).
         if closing_nomina is not None:
             filtered = []
             for m in movements_in_period:
-                if m.id == closing_nomina.id:
+                if m.orden_extracto == closing_nomina.orden_extracto:
                     break
                 filtered.append(m)
         else:
@@ -287,7 +298,7 @@ class MovementsService:
                 break
 
         if start_date_nomina:
-            filtered = [m for m in filtered if m.id != start_date_nomina.id]
+            filtered = [m for m in filtered if m.orden_extracto != start_date_nomina.orden_extracto]
 
         income_total = 0.0
         expense_total = 0.0

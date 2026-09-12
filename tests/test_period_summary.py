@@ -147,6 +147,177 @@ def test_period_summary_excludes_start_nomina_from_income(db_session) -> None:
     assert result.remaining_balance == 3500.0
 
 
+def test_period_summary_excludes_same_day_pre_nomina_income(db_session) -> None:
+    """EC-008: income on start_date with ordinal <= start-nómina ordinal is excluded
+    from income_total and income_count (even though it is chronologically part of
+    the same calendar day).  A later income within the period IS included.
+
+    Scenario: "Income before the start nómina on start_date".
+    Uses IDENTICAL fecha_movimiento for start-date movements to force reliance on
+    orden_extracto (no time-component discrimination).
+    """
+    account_id = create_account(db_session)
+    start = date(2024, 1, 1)
+
+    # Jan 1: income chronologically BEFORE the start nómina on same day (no "nomina" in label) → EXCLUDED
+    create_movement(
+        db_session,
+        account_id,
+        500.0,
+        MovementType.INGRESO,
+        fecha=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        concepto="Pago freelance anticipado",
+        disponible=3500.0,
+        orden_extracto=1,
+    )
+    # Jan 1: start-date nómina → EXCLUDED
+    create_movement(
+        db_session,
+        account_id,
+        3000.0,
+        MovementType.INGRESO,
+        fecha=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        concepto="Nómina January",
+        disponible=3500.0,
+        orden_extracto=2,
+    )
+    # Jan 15: later income in period → INCLUDED
+    create_movement(
+        db_session,
+        account_id,
+        200.0,
+        MovementType.INGRESO,
+        fecha=datetime(2024, 1, 15, tzinfo=timezone.utc),
+        concepto="Freelance",
+        disponible=3700.0,
+        orden_extracto=3,
+    )
+    db_session.commit()
+
+    service = make_service(db_session)
+    result = service.get_period_summary(account_id, start)
+
+    # Only the Jan 15 income counts; pre-nómina and start nómina are both excluded
+    assert result.income_total == 200.0
+    assert result.income_count == 1
+    # remaining_balance is the disponible of the last movement before the closing nómina
+    # (or the last included movement when there is no closing nómina)
+    assert result.remaining_balance == 3700.0
+
+
+def test_period_summary_includes_same_day_pre_nomina_gasto(db_session) -> None:
+    """EC-008: a gasto on start_date with ordinal <= start-nómina ordinal remains
+    INCLUDED in expense_total and expense_count (asymmetric boundary: only income
+    is excluded before the start nómina; gastos are always kept).
+
+    Scenario: "Expense before the start nómina on start_date".
+    Uses IDENTICAL fecha_movimiento for start-date movements.
+    """
+    account_id = create_account(db_session)
+    start = date(2024, 1, 1)
+
+    # Jan 1: gasto chronologically BEFORE the start nómina on same day → INCLUDED
+    create_movement(
+        db_session,
+        account_id,
+        -100.0,
+        MovementType.GASTO,
+        fecha=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        concepto="Gasto supermercado",
+        disponible=2900.0,
+        orden_extracto=1,
+    )
+    # Jan 1: start-date nómina → EXCLUDED from income only
+    create_movement(
+        db_session,
+        account_id,
+        3000.0,
+        MovementType.INGRESO,
+        fecha=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        concepto="Nómina January",
+        disponible=3000.0,
+        orden_extracto=2,
+    )
+    # Jan 10: another gasto in period → INCLUDED
+    create_movement(
+        db_session,
+        account_id,
+        -50.0,
+        MovementType.GASTO,
+        fecha=datetime(2024, 1, 10, tzinfo=timezone.utc),
+        concepto="Gasto Jan 10",
+        disponible=2850.0,
+        orden_extracto=3,
+    )
+    db_session.commit()
+
+    service = make_service(db_session)
+    result = service.get_period_summary(account_id, start)
+
+    # Both gastos are included: pre-nómina (ordinal 1) AND Jan 10 (ordinal 3)
+    assert result.expense_total == 150.0
+    assert result.expense_count == 2
+    # No income in period (start nómina excluded; no other income)
+    assert result.income_total == 0.0
+    assert result.income_count == 0
+    # remaining_balance from last included movement (Jan 10 gasto)
+    assert result.remaining_balance == 2850.0
+
+
+def test_period_summary_includes_same_day_post_nomina_income(db_session) -> None:
+    """EC-008: an ingreso on start_date with ordinal > start-nómina ordinal remains
+    INCLUDED in income_total and income_count.
+
+    Scenario: "Income after the start nómina on start_date".
+    Uses IDENTICAL fecha_movimiento for both start-date movements.
+    """
+    account_id = create_account(db_session)
+    start = date(2024, 1, 1)
+
+    # Jan 1: start-date nómina → EXCLUDED
+    create_movement(
+        db_session,
+        account_id,
+        3000.0,
+        MovementType.INGRESO,
+        fecha=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        concepto="Nómina January",
+        disponible=3000.0,
+        orden_extracto=1,
+    )
+    # Jan 1: income AFTER the start nómina on same day (no "nomina" in label) → INCLUDED
+    create_movement(
+        db_session,
+        account_id,
+        500.0,
+        MovementType.INGRESO,
+        fecha=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        concepto="Ingreso posterior",
+        disponible=3500.0,
+        orden_extracto=2,
+    )
+    # Jan 20: another income later in period → INCLUDED
+    create_movement(
+        db_session,
+        account_id,
+        200.0,
+        MovementType.INGRESO,
+        fecha=datetime(2024, 1, 20, tzinfo=timezone.utc),
+        concepto="Freelance",
+        disponible=3700.0,
+        orden_extracto=3,
+    )
+    db_session.commit()
+
+    service = make_service(db_session)
+    result = service.get_period_summary(account_id, start)
+
+    # Both post-nómina income and later income are included
+    assert result.income_total == 700.0
+    assert result.income_count == 2
+    assert result.remaining_balance == 3700.0
+
+
 def test_period_summary_zero_totals_when_no_movements(db_session) -> None:
     """Period with no movements returns zero totals."""
     account_id = create_account(db_session)

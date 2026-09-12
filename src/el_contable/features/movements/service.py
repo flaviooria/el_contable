@@ -223,7 +223,9 @@ class MovementsService:
         normalized concepto contains "nomina", ordered by orden_extracto
         (the single source of chronological truth).
 
-        The salary movement at start_date is excluded from income totals.
+        The period begins strictly after the start-date nómina for income: the
+        salary movement and any INGRESO with orden_extracto less than or equal to
+        it are excluded. GASTO movements on start_date remain included.
         Expense totals are reported as positive numbers (absolute sum).
 
         All monetary values (income_total, expense_total, remaining_balance)
@@ -298,7 +300,12 @@ class MovementsService:
                 break
 
         if start_date_nomina:
-            filtered = [m for m in filtered if m.orden_extracto != start_date_nomina.orden_extracto]
+            filtered = [
+                m
+                for m in filtered
+                if m.tipo != MovementType.INGRESO
+                or m.orden_extracto > start_date_nomina.orden_extracto
+            ]
 
         income_total = 0.0
         expense_total = 0.0

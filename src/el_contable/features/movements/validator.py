@@ -12,7 +12,7 @@ class MovementsValidator:
 
         Returns ``Concepto`` alone when ``Movimiento`` is empty.
         """
-        concept = row.concepto or ""
+        concept = row.concept or ""
         concept = concept.strip()
 
         if row.movimiento and row.movimiento.strip():

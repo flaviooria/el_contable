@@ -1,11 +1,11 @@
-"""Tests for orden_extracto semantics (EC-007 / movement-ordering).
+"""Tests for order_statement semantics (EC-007 / movement-ordering).
 
 Covers:
-- 4.1: Same-day income before closing nómina via orden_extracto (F1 regression)
+- 4.1: Same-day income before closing salary via order_statement (F1 regression)
 - 4.2: Backfill produces strictly increasing per-account sequence
-- 4.3: Period-summary boundary detection via orden_extracto
-- 4.4: (account_id, orden_extracto) uniqueness enforced
-- 4.5: Re-upload does not reassign existing orden_extracto
+- 4.3: Period-summary boundary detection via order_statement
+- 4.4: (account_id, order_statement) uniqueness enforced
+- 4.5: Re-upload does not reassign existing order_statement
 - 4.6: Existing /totals and /period-summary contracts remain green
 """
 
@@ -42,22 +42,21 @@ def create_account(db_session, base_balance: float = 0.0) -> uuid.UUID:
 def create_movement(
     db_session,
     account_id: uuid.UUID,
-    importe: float,
-    tipo: MovementType,
-    fecha: datetime | None = None,
-    concepto: str = "Test movement",
-    disponible: float | None = None,
-    orden_extracto: int = 1,
+    amount: float,
+    movement_type: MovementType,
+    movement_date: date | None = None,
+    concept: str = "Test movement",
+    available_balance: float | None = None,
+    order_statement: int = 1,
 ) -> Movement:
     movement = Movement(
         account_id=account_id,
-        fecha_movimiento=fecha or datetime.now(timezone.utc),
-        concepto=concepto,
-        importe=importe,
-        tipo=tipo,
-        disponible=disponible if disponible is not None else importe,
-        expires_at=datetime.now(timezone.utc),
-        orden_extracto=orden_extracto,
+        movement_date=movement_date or datetime.now(timezone.utc).date(),
+        concept=concept,
+        amount=amount,
+        type=movement_type,
+        available_balance=available_balance if available_balance is not None else amount,
+        order_statement=order_statement,
     )
     db_session.add(movement)
     db_session.flush()
@@ -70,43 +69,43 @@ def create_movement(
 
 
 def test_same_day_income_before_closing_nomina_included_in_period(db_session) -> None:
-    """EC-006 review F1: income and closing nómina share IDENTICAL fecha_movimiento
+    """EC-006 review F1: income and closing salary share IDENTICAL movement_date
     (bank exports are date-only; parser converts to 00:00 UTC). They are differentiated
-    ONLY by orden_extracto: income has LOWER ordinal (chronologically earlier), nómina
+    ONLY by order_statement: income has LOWER ordinal (chronologically earlier), salary
     has HIGHER ordinal.
 
-    This test FAILS on the pre-EC-007 ordering (ORDER BY fecha_movimiento, id DESC)
-    because without a time component both movements have fecha=2024-03-05 00:00:00
+    This test FAILS on the pre-EC-007 ordering (ORDER BY movement_date, id DESC)
+    because without a time component both movements have movement_date=2024-03-05 00:00:00
     and id order alone does not encode the correct same-day statement order.
 
-    With orden_extracto as the source of truth: income is included in the period,
-    feeds remaining_balance, and period_end equals the closing nómina's date.
+    With order_statement as the source of truth: income is included in the period,
+    feeds remaining_balance, and period_end equals the closing salary's date.
     """
     account_id = create_account(db_session)
     start = date(2024, 3, 1)
 
-    # Both movements: IDENTICAL fecha_movimiento (date-only bank export → 00:00 UTC)
-    # Income: chronologically earlier in statement → LOWER orden_extracto
+    # Both movements: IDENTICAL movement_date (date-only bank export → 00:00 UTC)
+    # Income: chronologically earlier in statement → LOWER order_statement
     create_movement(
         db_session,
         account_id,
         500.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 3, 5, tzinfo=timezone.utc),
-        concepto="Freelance",
-        disponible=1500.0,
-        orden_extracto=1,
+        movement_date=date(2024, 3, 5),
+        concept="Freelance",
+        available_balance=1500.0,
+        order_statement=1,
     )
-    # Closing nómina: chronologically later in statement → HIGHER orden_extracto
+    # Closing salary: chronologically later in statement → HIGHER order_statement
     create_movement(
         db_session,
         account_id,
         3000.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 3, 5, tzinfo=timezone.utc),
-        concepto="Nómina March",
-        disponible=4500.0,
-        orden_extracto=2,
+        movement_date=date(2024, 3, 5),
+        concept="Nómina March",
+        available_balance=4500.0,
+        order_statement=2,
     )
     db_session.commit()
 
@@ -127,13 +126,13 @@ def test_same_day_income_before_closing_nomina_included_in_period(db_session) ->
 
 
 def test_backfill_produces_strictly_increasing_sequence(db_session) -> None:
-    """The backfill invariant: when movements are ordered by (fecha_movimiento ASC,
-    id DESC), their orden_extracto values are strictly increasing (no gaps, 1-based).
+    """The backfill invariant: when movements are ordered by (movement_date ASC,
+    id DESC), their order_statement values are strictly increasing (no gaps, 1-based).
 
-    Approach: create movements with explicit orden_extracto values that follow the
+    Approach: create movements with explicit order_statement values that follow the
     backfill formula (row_number over partition by account_id order by
-    fecha_movimiento ASC, id DESC). Then verify:
-      - ordinals are strictly increasing when ordered by (fecha ASC, id DESC)
+    movement_date ASC, id DESC). Then verify:
+      - ordinals are strictly increasing when ordered by (movement_date ASC, id DESC)
       - same-date ties broken by id DESC are respected
 
     We simulate the backfill by assigning ordinals that match the formula output.
@@ -144,43 +143,39 @@ def test_backfill_produces_strictly_increasing_sequence(db_session) -> None:
     # Assign provisional ordinals (all distinct) to pass the unique constraint on insert.
     m_late = Movement(
         account_id=account_id,
-        fecha_movimiento=datetime(2024, 3, 1, tzinfo=timezone.utc),
-        concepto="Late March",
-        importe=100.0,
-        tipo=MovementType.INGRESO,
-        disponible=100.0,
-        expires_at=datetime.now(timezone.utc),
-        orden_extracto=10,
+        movement_date=date(2024, 3, 1),
+        concept="Late March",
+        amount=100.0,
+        type=MovementType.INGRESO,
+        available_balance=100.0,
+        order_statement=10,
     )
     m_early1 = Movement(
         account_id=account_id,
-        fecha_movimiento=datetime(2024, 1, 15, tzinfo=timezone.utc),
-        concepto="Early January A",
-        importe=50.0,
-        tipo=MovementType.GASTO,
-        disponible=50.0,
-        expires_at=datetime.now(timezone.utc),
-        orden_extracto=20,
+        movement_date=date(2024, 1, 15),
+        concept="Early January A",
+        amount=50.0,
+        type=MovementType.GASTO,
+        available_balance=50.0,
+        order_statement=20,
     )
     m_early2 = Movement(
         account_id=account_id,
-        fecha_movimiento=datetime(2024, 1, 15, tzinfo=timezone.utc),
-        concepto="Early January B",
-        importe=75.0,
-        tipo=MovementType.INGRESO,
-        disponible=125.0,
-        expires_at=datetime.now(timezone.utc),
-        orden_extracto=30,
+        movement_date=date(2024, 1, 15),
+        concept="Early January B",
+        amount=75.0,
+        type=MovementType.INGRESO,
+        available_balance=125.0,
+        order_statement=30,
     )
     m_mid = Movement(
         account_id=account_id,
-        fecha_movimiento=datetime(2024, 2, 10, tzinfo=timezone.utc),
-        concepto="Mid February",
-        importe=-25.0,
-        tipo=MovementType.GASTO,
-        disponible=100.0,
-        expires_at=datetime.now(timezone.utc),
-        orden_extracto=40,
+        movement_date=date(2024, 2, 10),
+        concept="Mid February",
+        amount=-25.0,
+        type=MovementType.GASTO,
+        available_balance=100.0,
+        order_statement=40,
     )
 
     db_session.add_all([m_late, m_early1, m_early2, m_mid])
@@ -188,73 +183,73 @@ def test_backfill_produces_strictly_increasing_sequence(db_session) -> None:
 
     # Simulate backfill: query in backfill order, then reassign ordinals in that order.
     # This replicates what the migration SQL does:
-    #   row_number() over (partition by account_id order by fecha_movimiento, id DESC)
+    #   row_number() over (partition by account_id order by movement_date, id DESC)
     from sqlalchemy import select
 
     stmt = (
         select(Movement)
         .where(Movement.account_id == account_id)
-        .order_by(Movement.fecha_movimiento.asc(), Movement.id.desc())
+        .order_by(Movement.movement_date.asc(), Movement.id.desc())
     )
     ordered = list(db_session.execute(stmt).scalars().all())
     assert len(ordered) == 4
 
     # Assign backfill ordinals 1..4 in backfill order
     for i, m in enumerate(ordered):
-        m.orden_extracto = i + 1
+        m.order_statement = i + 1
     db_session.flush()
 
-    # Verify: ordered by (fecha ASC, id DESC) → ordinals 1, 2, 3, 4 (strictly increasing)
+    # Verify: ordered by (movement_date ASC, id DESC) → ordinals 1, 2, 3, 4 (strictly increasing)
     ordered_verify = list(
         db_session.execute(
             select(Movement)
             .where(Movement.account_id == account_id)
-            .order_by(Movement.fecha_movimiento.asc(), Movement.id.desc())
+            .order_by(Movement.movement_date.asc(), Movement.id.desc())
         )
         .scalars()
         .all()
     )
-    ordinals = [m.orden_extracto for m in ordered_verify]
+    ordinals = [m.order_statement for m in ordered_verify]
     assert ordinals == [1, 2, 3, 4], (
         f"Backfill produced non-strictly-increasing sequence: {ordinals}"
     )
 
     # Verify same-date tie-breaking: both Jan-15 movements; the one with higher id
     # (earlier in statement order) should have lower ordinal.
-    jan_movements = [m for m in ordered_verify if m.fecha_movimiento.date() == date(2024, 1, 15)]
+    jan_movements = [m for m in ordered_verify if m.movement_date == date(2024, 1, 15)]
     assert len(jan_movements) == 2
     assert jan_movements[0].id > jan_movements[1].id, "Higher id should come first (id DESC)"
-    assert jan_movements[0].orden_extracto < jan_movements[1].orden_extracto, (
+    assert jan_movements[0].order_statement < jan_movements[1].order_statement, (
         "Higher id (earlier in day) should have lower ordinal"
     )
 
 
 # =============================================================================
-# 4.3 – Period-summary boundary detection via orden_extracto
+# 4.3 – Period-summary boundary detection via order_statement
 # =============================================================================
 
 
 def test_period_summary_same_day_before_closing_nomina_included(db_session) -> None:
-    """Movement on the same calendar day as the closing nómina but with lower
-    orden_extracto is included in the period.  Both share IDENTICAL fecha_movimiento
-    (date-only export → 00:00 UTC), differentiated only by orden_extracto.
+    """Movement on the same calendar day as the closing salary but with lower
+    order_statement is included in the period.  Both share IDENTICAL movement_date
+    (date-only export → 00:00 UTC), differentiated only by order_statement.
 
     This test FAILS on the pre-EC-007 ordering because both same-day movements
-    have identical fecha and their relative position depends on orden_extracto.
+    have identical movement_date and their relative position depends on order_statement.
     """
     account_id = create_account(db_session)
     start = date(2024, 4, 1)
 
-    # Apr 10: gasto included
+    # Apr 10: expense included
     create_movement(
         db_session,
         account_id,
         -200.0,
         MovementType.GASTO,
-        fecha=datetime(2024, 4, 10, tzinfo=timezone.utc),
-        concepto="Gasto",
-        disponible=800.0,
-        orden_extracto=1,
+        movement_date=date(2024, 4, 10),
+        concept="Gasto",
+        available_balance=800.0,
+        order_statement=1,
     )
     # Apr 30: income SAME fecha as closing nómina but earlier (lower ordinal)
     create_movement(
@@ -262,10 +257,10 @@ def test_period_summary_same_day_before_closing_nomina_included(db_session) -> N
         account_id,
         300.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 4, 30, tzinfo=timezone.utc),
-        concepto="Freelance Apr",
-        disponible=1100.0,
-        orden_extracto=2,
+        movement_date=date(2024, 4, 30),
+        concept="Freelance Apr",
+        available_balance=1100.0,
+        order_statement=2,
     )
     # Apr 30: closing nómina (later statement position, higher ordinal)
     create_movement(
@@ -273,10 +268,10 @@ def test_period_summary_same_day_before_closing_nomina_included(db_session) -> N
         account_id,
         2000.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 4, 30, tzinfo=timezone.utc),
-        concepto="Nómina April",
-        disponible=3100.0,
-        orden_extracto=3,
+        movement_date=date(2024, 4, 30),
+        concept="Nómina April",
+        available_balance=3100.0,
+        order_statement=3,
     )
     db_session.commit()
 
@@ -291,8 +286,8 @@ def test_period_summary_same_day_before_closing_nomina_included(db_session) -> N
     assert result.expense_count == 1
 
 
-def test_period_summary_open_ended_with_orden_extracto(db_session) -> None:
-    """orden_extracto does not affect open-ended period behaviour."""
+def test_period_summary_open_ended_with_order_statement(db_session) -> None:
+    """order_statement does not affect open-ended period behaviour."""
     account_id = create_account(db_session)
     start = date(2024, 5, 1)
 
@@ -301,20 +296,20 @@ def test_period_summary_open_ended_with_orden_extracto(db_session) -> None:
         account_id,
         1000.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 5, 15, tzinfo=timezone.utc),
-        concepto="Income",
-        disponible=1000.0,
-        orden_extracto=1,
+        movement_date=date(2024, 5, 15),
+        concept="Income",
+        available_balance=1000.0,
+        order_statement=1,
     )
     create_movement(
         db_session,
         account_id,
         -200.0,
         MovementType.GASTO,
-        fecha=datetime(2024, 5, 20, tzinfo=timezone.utc),
-        concepto="Gasto",
-        disponible=800.0,
-        orden_extracto=2,
+        movement_date=date(2024, 5, 20),
+        concept="Gasto",
+        available_balance=800.0,
+        order_statement=2,
     )
     db_session.commit()
 
@@ -328,41 +323,40 @@ def test_period_summary_open_ended_with_orden_extracto(db_session) -> None:
 
 
 # =============================================================================
-# 4.4 – (account_id, orden_extracto) uniqueness enforced
+# 4.4 – (account_id, order_statement) uniqueness enforced
 # =============================================================================
 
 
-def test_orden_extracto_unique_per_account_violation_raises_integrity_error(
+def test_order_statement_unique_per_account_violation_raises_integrity_error(
     db_session,
 ) -> None:
-    """Inserting two movements with the same (account_id, orden_extracto) raises
+    """Inserting two movements with the same (account_id, order_statement) raises
     an IntegrityError (SQLite reports as IntegrityError; PostgreSQL would raise
     the same via the DB-level UNIQUE constraint)."""
     account_id = create_account(db_session)
 
-    # Insert first movement with orden_extracto=5
+    # Insert first movement with order_statement=5
     create_movement(
         db_session,
         account_id,
         100.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 1, 1, tzinfo=timezone.utc),
-        concepto="First",
-        disponible=100.0,
-        orden_extracto=5,
+        movement_date=date(2024, 1, 1),
+        concept="First",
+        available_balance=100.0,
+        order_statement=5,
     )
     db_session.commit()
 
-    # Attempt to insert second movement with the SAME account_id and orden_extracto=5
+    # Attempt to insert second movement with the SAME account_id and order_statement=5
     second = Movement(
         account_id=account_id,
-        fecha_movimiento=datetime(2024, 1, 2, tzinfo=timezone.utc),
-        concepto="Duplicate ordinal",
-        importe=50.0,
-        tipo=MovementType.GASTO,
-        disponible=50.0,
-        expires_at=datetime.now(timezone.utc),
-        orden_extracto=5,  # same ordinal → violates unique constraint
+        movement_date=date(2024, 1, 2),
+        concept="Duplicate ordinal",
+        amount=50.0,
+        type=MovementType.GASTO,
+        available_balance=50.0,
+        order_statement=5,  # same ordinal → violates unique constraint
     )
     db_session.add(second)
     with pytest.raises(IntegrityError):
@@ -370,7 +364,7 @@ def test_orden_extracto_unique_per_account_violation_raises_integrity_error(
 
 
 # =============================================================================
-# 4.5 – Re-upload does not reassign existing orden_extracto
+# 4.5 – Re-upload does not reassign existing order_statement
 # =============================================================================
 
 
@@ -383,9 +377,9 @@ def _make_csv_content() -> bytes:
     )
 
 
-def test_reupload_does_not_reassign_existing_orden_extracto(db_session) -> None:
+def test_reupload_does_not_reassign_existing_order_statement(db_session) -> None:
     """Uploading the same file twice: the second upload deduplicates existing
-    movements and does NOT change their orden_extracto values."""
+    movements and does NOT change their order_statement values."""
     account_id = create_account(db_session)
     db_session.commit()
 
@@ -398,16 +392,16 @@ def test_reupload_does_not_reassign_existing_orden_extracto(db_session) -> None:
     assert result1.inserted_count == 2
     db_session.commit()
 
-    # Read back the orden_extracto values assigned in first upload
+    # Read back the order_statement values assigned in first upload
     movimientos = (
         db_session.query(Movement)
         .filter(Movement.account_id == account_id)
-        .order_by(Movement.orden_extracto)
+        .order_by(Movement.order_statement)
         .all()
     )
     assert len(movimientos) == 2
-    first_ordinal_1 = movimientos[0].orden_extracto
-    first_ordinal_2 = movimientos[1].orden_extracto
+    first_ordinal_1 = movimientos[0].order_statement
+    first_ordinal_2 = movimientos[1].order_statement
 
     # Second upload: same CSV → deduplication, no new ordinals assigned
     result2 = service.upload(csv, "movements.csv")
@@ -415,20 +409,20 @@ def test_reupload_does_not_reassign_existing_orden_extracto(db_session) -> None:
     assert result2.skipped_count == 2
     db_session.commit()
 
-    # orden_extracto values must be unchanged
+    # order_statement values must be unchanged
     movimientos_after = (
         db_session.query(Movement)
         .filter(Movement.account_id == account_id)
-        .order_by(Movement.orden_extracto)
+        .order_by(Movement.order_statement)
         .all()
     )
     assert len(movimientos_after) == 2
-    assert movimientos_after[0].orden_extracto == first_ordinal_1
-    assert movimientos_after[1].orden_extracto == first_ordinal_2
+    assert movimientos_after[0].order_statement == first_ordinal_1
+    assert movimientos_after[1].order_statement == first_ordinal_2
 
 
-def test_upload_assigns_continuing_orden_extracto(db_session) -> None:
-    """New movements receive orden_extracto continuing after the maximum existing."""
+def test_upload_assigns_continuing_order_statement(db_session) -> None:
+    """New movements receive order_statement continuing after the maximum existing."""
     account_id = create_account(db_session)
     db_session.commit()
 
@@ -440,7 +434,7 @@ def test_upload_assigns_continuing_orden_extracto(db_session) -> None:
     db_session.commit()
 
     m1 = db_session.query(Movement).filter(Movement.account_id == account_id).one()
-    assert m1.orden_extracto == 1
+    assert m1.order_statement == 1
 
     # Second upload: new movements should continue from max existing (1)
     csv2 = (
@@ -455,10 +449,10 @@ def test_upload_assigns_continuing_orden_extracto(db_session) -> None:
     movimientos = (
         db_session.query(Movement)
         .filter(Movement.account_id == account_id)
-        .order_by(Movement.orden_extracto)
+        .order_by(Movement.order_statement)
         .all()
     )
-    ordinales = [m.orden_extracto for m in movimientos]
+    ordinales = [m.order_statement for m in movimientos]
     # First upload: ordinal 1; Second upload: 2 and 3 (continuing)
     assert ordinales == [1, 2, 3]
 
@@ -466,11 +460,11 @@ def test_upload_assigns_continuing_orden_extracto(db_session) -> None:
 def test_upload_same_day_movements_keep_statement_order(db_session) -> None:
     """Upload with two same-day movements listed in reverse statement order
     (earlier-in-day row appears LATER in the file, as in real bank exports).
-    orden_extracto must reflect statement chronology: earlier row gets LOWER ordinal.
+    order_statement must reflect statement chronology: earlier row gets LOWER ordinal.
 
     Spec scenario: "Same-day movements keep statement order".
-    This test FAILS with ORDER BY fecha_movimiento, id DESC alone because both
-    movements have identical fecha (2024-01-15 → 00:00 UTC) and id order happens
+    This test FAILS with ORDER BY movement_date, id DESC alone because both
+    movements have identical movement_date (2024-01-15 → 00:00 UTC) and id order happens
     to match statement order only by insertion coincidence — not by semantic guarantee.
     """
     account_id = create_account(db_session)
@@ -494,17 +488,17 @@ def test_upload_same_day_movements_keep_statement_order(db_session) -> None:
     movimientos = (
         db_session.query(Movement)
         .filter(Movement.account_id == account_id)
-        .order_by(Movement.orden_extracto)
+        .order_by(Movement.order_statement)
         .all()
     )
     assert len(movimientos) == 2
 
-    # orden_extracto=1 → earlier in statement order (Ingreso A, row 1 in file)
-    # orden_extracto=2 → later in statement order (Gasto B, row 2 in file)
-    assert movimientos[0].concepto == "Ingreso A"
-    assert movimientos[0].orden_extracto == 1
-    assert movimientos[1].concepto == "Gasto B"
-    assert movimientos[1].orden_extracto == 2
+    # order_statement=1 → earlier in statement order (Ingreso A, row 1 in file)
+    # order_statement=2 → later in statement order (Gasto B, row 2 in file)
+    assert movimientos[0].concept == "Ingreso A"
+    assert movimientos[0].order_statement == 1
+    assert movimientos[1].concept == "Gasto B"
+    assert movimientos[1].order_statement == 2
 
 
 # =============================================================================
@@ -520,9 +514,9 @@ def test_get_totals_response_shape_unchanged(db_session) -> None:
         account_id,
         1000.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 1, 1, tzinfo=timezone.utc),
-        disponible=1000.0,
-        orden_extracto=1,
+        movement_date=date(2024, 1, 1),
+        available_balance=1000.0,
+        order_statement=1,
     )
     db_session.commit()
 
@@ -552,20 +546,20 @@ def test_period_summary_response_shape_unchanged(db_session) -> None:
         account_id,
         1000.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 1, 1, tzinfo=timezone.utc),
-        concepto="Nómina",
-        disponible=1000.0,
-        orden_extracto=1,
+        movement_date=date(2024, 1, 1),
+        concept="Nómina",
+        available_balance=1000.0,
+        order_statement=1,
     )
     create_movement(
         db_session,
         account_id,
         -300.0,
         MovementType.GASTO,
-        fecha=datetime(2024, 1, 15, tzinfo=timezone.utc),
-        concepto="Gasto",
-        disponible=700.0,
-        orden_extracto=2,
+        movement_date=date(2024, 1, 15),
+        concept="Gasto",
+        available_balance=700.0,
+        order_statement=2,
     )
     db_session.commit()
 

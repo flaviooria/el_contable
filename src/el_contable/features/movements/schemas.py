@@ -11,11 +11,11 @@ class MovementType(str, Enum):
 
 
 class MovementBase(BaseModel):
-    fecha_movimiento: datetime
-    concepto: str = Field(..., min_length=1)
-    importe: float
-    tipo: MovementType
-    disponible: float
+    movement_date: date
+    concept: str = Field(..., min_length=1)
+    amount: float
+    type: MovementType
+    available_balance: float
 
 
 class MovementCreate(MovementBase):
@@ -23,20 +23,19 @@ class MovementCreate(MovementBase):
 
 
 class MovementResponse(MovementBase):
-    id: int
+    id: uuid.UUID
     created_at: datetime
-    expires_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class MovementRow(BaseModel):
     fecha: str | None = None
-    fecha_movimiento: datetime | None = None
-    concepto: str | None = None
+    movement_date: date | None = None
+    concept: str | None = None
     movimiento: str | None = None
-    importe: float | None = None
-    disponible: float | None = None
+    amount: float | None = None
+    available_balance: float | None = None
     is_valid: bool = True
     validation_error: str | None = None
 

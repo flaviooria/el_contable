@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime
 
 import polars as pl
 from polars import DataFrame
@@ -48,19 +48,19 @@ class MovementsParser:
 
     def _parse_row(self, row: dict) -> MovementRow:
         fecha = row.get("Fecha")
-        concepto = row.get("Concepto")
+        concept_raw = row.get("Concepto")
         movimiento = row.get("Movimiento")
-        importe = row.get("Importe")
-        disponible = row.get("Disponible")
+        amount_raw = row.get("Importe")
+        available_raw = row.get("Disponible")
 
         raw_fecha = self._as_string(fecha)
 
         parsed_row = MovementRow(
             fecha=raw_fecha,
-            concepto=concepto,
+            concept=concept_raw,
             movimiento=movimiento,
-            importe=importe,
-            disponible=disponible,
+            amount=amount_raw,
+            available_balance=available_raw,
             is_valid=True,
             validation_error=None,
         )
@@ -71,35 +71,35 @@ class MovementsParser:
             return parsed_row
 
         try:
-            parsed_row.fecha_movimiento = self._parse_date(raw_fecha)
+            parsed_row.movement_date = self._parse_date(raw_fecha)
         except ValueError:
             parsed_row.is_valid = False
             parsed_row.validation_error = f"Invalid date format: {raw_fecha}"
             return parsed_row
 
-        if concepto is None or (isinstance(concepto, str) and not concepto.strip()):
+        if concept_raw is None or (isinstance(concept_raw, str) and not concept_raw.strip()):
             parsed_row.is_valid = False
             parsed_row.validation_error = "Concepto is required"
             return parsed_row
 
-        if importe is None:
+        if amount_raw is None:
             parsed_row.is_valid = False
             parsed_row.validation_error = "Importe is required"
             return parsed_row
 
         try:
-            parsed_row.importe = float(importe)
+            parsed_row.amount = float(amount_raw)
         except (ValueError, TypeError):
             parsed_row.is_valid = False
-            parsed_row.validation_error = f"Invalid Importe: {importe}"
+            parsed_row.validation_error = f"Invalid Importe: {amount_raw}"
             return parsed_row
 
-        if disponible is not None:
+        if available_raw is not None:
             try:
-                parsed_row.disponible = float(disponible)
+                parsed_row.available_balance = float(available_raw)
             except (ValueError, TypeError):
                 parsed_row.is_valid = False
-                parsed_row.validation_error = f"Invalid Disponible: {disponible}"
+                parsed_row.validation_error = f"Invalid Disponible: {available_raw}"
                 return parsed_row
 
         return parsed_row
@@ -113,7 +113,7 @@ class MovementsParser:
             return value.isoformat()
         return str(value)
 
-    def _parse_date(self, date_str: str) -> datetime:
+    def _parse_date(self, date_str: str) -> date:
         formats = [
             "%Y-%m-%d",
             "%d/%m/%Y",
@@ -126,7 +126,7 @@ class MovementsParser:
         for fmt in formats:
             try:
                 parsed = datetime.strptime(date_str, fmt)
-                return parsed.replace(tzinfo=timezone.utc)
+                return parsed.date()
             except ValueError:
                 continue
         raise ValueError(f"Unable to parse date: {date_str}")

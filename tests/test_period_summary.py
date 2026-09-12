@@ -30,22 +30,21 @@ def create_account(db_session, base_balance: float = 0.0) -> uuid.UUID:
 def create_movement(
     db_session,
     account_id: uuid.UUID,
-    importe: float,
-    tipo: MovementType,
-    fecha: datetime | None = None,
-    concepto: str = "Test movement",
-    disponible: float | None = None,
-    orden_extracto: int = 1,
+    amount: float,
+    movement_type: MovementType,
+    movement_date: date | None = None,
+    concept: str = "Test movement",
+    available_balance: float | None = None,
+    order_statement: int = 1,
 ) -> Movement:
     movement = Movement(
         account_id=account_id,
-        fecha_movimiento=fecha or datetime.now(timezone.utc),
-        concepto=concepto,
-        importe=importe,
-        tipo=tipo,
-        disponible=disponible if disponible is not None else importe,
-        expires_at=datetime.now(timezone.utc),
-        orden_extracto=orden_extracto,
+        movement_date=movement_date or datetime.now(timezone.utc).date(),
+        concept=concept,
+        amount=amount,
+        type=movement_type,
+        available_balance=available_balance if available_balance is not None else amount,
+        order_statement=order_statement,
     )
     db_session.add(movement)
     db_session.flush()
@@ -68,10 +67,10 @@ def test_period_summary_returns_correct_totals(db_session) -> None:
         account_id,
         1000.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 1, 1, 8, 0, tzinfo=timezone.utc),
-        concepto="Nómina January",
-        disponible=1000.0,
-        orden_extracto=1,
+        movement_date=date(2024, 1, 1),
+        concept="Nómina January",
+        available_balance=1000.0,
+        order_statement=1,
     )
     # Other income in period
     create_movement(
@@ -79,21 +78,21 @@ def test_period_summary_returns_correct_totals(db_session) -> None:
         account_id,
         200.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc),
-        concepto="Freelance payment",
-        disponible=1200.0,
-        orden_extracto=2,
+        movement_date=date(2024, 1, 15),
+        concept="Freelance payment",
+        available_balance=1200.0,
+        order_statement=2,
     )
-    # Expense in period (negative importe per DB convention)
+    # Expense in period (negative amount per DB convention)
     create_movement(
         db_session,
         account_id,
         -150.0,
         MovementType.GASTO,
-        fecha=datetime(2024, 1, 20, 12, 0, tzinfo=timezone.utc),
-        concepto="Groceries",
-        disponible=1050.0,
-        orden_extracto=3,
+        movement_date=date(2024, 1, 20),
+        concept="Groceries",
+        available_balance=1050.0,
+        order_statement=3,
     )
     db_session.commit()
 
@@ -121,10 +120,10 @@ def test_period_summary_excludes_start_nomina_from_income(db_session) -> None:
         account_id,
         3000.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc),
-        concepto="Nómina",
-        disponible=3000.0,
-        orden_extracto=1,
+        movement_date=date(2024, 1, 1),
+        concept="Nómina",
+        available_balance=3000.0,
+        order_statement=1,
     )
     # Another income later
     create_movement(
@@ -132,10 +131,10 @@ def test_period_summary_excludes_start_nomina_from_income(db_session) -> None:
         account_id,
         500.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 1, 10, 0, 0, tzinfo=timezone.utc),
-        concepto="Bonus",
-        disponible=3500.0,
-        orden_extracto=2,
+        movement_date=date(2024, 1, 10),
+        concept="Bonus",
+        available_balance=3500.0,
+        order_statement=2,
     )
     db_session.commit()
 
@@ -153,8 +152,8 @@ def test_period_summary_excludes_same_day_pre_nomina_income(db_session) -> None:
     the same calendar day).  A later income within the period IS included.
 
     Scenario: "Income before the start nómina on start_date".
-    Uses IDENTICAL fecha_movimiento for start-date movements to force reliance on
-    orden_extracto (no time-component discrimination).
+    Uses IDENTICAL movement_date for start-date movements to force reliance on
+    order_statement (no time-component discrimination).
     """
     account_id = create_account(db_session)
     start = date(2024, 1, 1)
@@ -165,10 +164,10 @@ def test_period_summary_excludes_same_day_pre_nomina_income(db_session) -> None:
         account_id,
         500.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 1, 1, tzinfo=timezone.utc),
-        concepto="Pago freelance anticipado",
-        disponible=3500.0,
-        orden_extracto=1,
+        movement_date=date(2024, 1, 1),
+        concept="Pago freelance anticipado",
+        available_balance=3500.0,
+        order_statement=1,
     )
     # Jan 1: start-date nómina → EXCLUDED
     create_movement(
@@ -176,10 +175,10 @@ def test_period_summary_excludes_same_day_pre_nomina_income(db_session) -> None:
         account_id,
         3000.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 1, 1, tzinfo=timezone.utc),
-        concepto="Nómina January",
-        disponible=3500.0,
-        orden_extracto=2,
+        movement_date=date(2024, 1, 1),
+        concept="Nómina January",
+        available_balance=3500.0,
+        order_statement=2,
     )
     # Jan 15: later income in period → INCLUDED
     create_movement(
@@ -187,10 +186,10 @@ def test_period_summary_excludes_same_day_pre_nomina_income(db_session) -> None:
         account_id,
         200.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 1, 15, tzinfo=timezone.utc),
-        concepto="Freelance",
-        disponible=3700.0,
-        orden_extracto=3,
+        movement_date=date(2024, 1, 15),
+        concept="Freelance",
+        available_balance=3700.0,
+        order_statement=3,
     )
     db_session.commit()
 
@@ -200,8 +199,8 @@ def test_period_summary_excludes_same_day_pre_nomina_income(db_session) -> None:
     # Only the Jan 15 income counts; pre-nómina and start nómina are both excluded
     assert result.income_total == 200.0
     assert result.income_count == 1
-    # remaining_balance is the disponible of the last movement before the closing nómina
-    # (or the last included movement when there is no closing nómina)
+    # remaining_balance is the available_balance of the last movement before the closing salary
+    # (or the last included movement when there is no closing salary)
     assert result.remaining_balance == 3700.0
 
 
@@ -211,7 +210,7 @@ def test_period_summary_includes_same_day_pre_nomina_gasto(db_session) -> None:
     is excluded before the start nómina; gastos are always kept).
 
     Scenario: "Expense before the start nómina on start_date".
-    Uses IDENTICAL fecha_movimiento for start-date movements.
+    Uses IDENTICAL movement_date for start-date movements.
     """
     account_id = create_account(db_session)
     start = date(2024, 1, 1)
@@ -222,10 +221,10 @@ def test_period_summary_includes_same_day_pre_nomina_gasto(db_session) -> None:
         account_id,
         -100.0,
         MovementType.GASTO,
-        fecha=datetime(2024, 1, 1, tzinfo=timezone.utc),
-        concepto="Gasto supermercado",
-        disponible=2900.0,
-        orden_extracto=1,
+        movement_date=date(2024, 1, 1),
+        concept="Gasto supermercado",
+        available_balance=2900.0,
+        order_statement=1,
     )
     # Jan 1: start-date nómina → EXCLUDED from income only
     create_movement(
@@ -233,10 +232,10 @@ def test_period_summary_includes_same_day_pre_nomina_gasto(db_session) -> None:
         account_id,
         3000.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 1, 1, tzinfo=timezone.utc),
-        concepto="Nómina January",
-        disponible=3000.0,
-        orden_extracto=2,
+        movement_date=date(2024, 1, 1),
+        concept="Nómina January",
+        available_balance=3000.0,
+        order_statement=2,
     )
     # Jan 10: another gasto in period → INCLUDED
     create_movement(
@@ -244,10 +243,10 @@ def test_period_summary_includes_same_day_pre_nomina_gasto(db_session) -> None:
         account_id,
         -50.0,
         MovementType.GASTO,
-        fecha=datetime(2024, 1, 10, tzinfo=timezone.utc),
-        concepto="Gasto Jan 10",
-        disponible=2850.0,
-        orden_extracto=3,
+        movement_date=date(2024, 1, 10),
+        concept="Gasto Jan 10",
+        available_balance=2850.0,
+        order_statement=3,
     )
     db_session.commit()
 
@@ -269,7 +268,7 @@ def test_period_summary_includes_same_day_post_nomina_income(db_session) -> None
     INCLUDED in income_total and income_count.
 
     Scenario: "Income after the start nómina on start_date".
-    Uses IDENTICAL fecha_movimiento for both start-date movements.
+    Uses IDENTICAL movement_date for both start-date movements.
     """
     account_id = create_account(db_session)
     start = date(2024, 1, 1)
@@ -280,10 +279,10 @@ def test_period_summary_includes_same_day_post_nomina_income(db_session) -> None
         account_id,
         3000.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 1, 1, tzinfo=timezone.utc),
-        concepto="Nómina January",
-        disponible=3000.0,
-        orden_extracto=1,
+        movement_date=date(2024, 1, 1),
+        concept="Nómina January",
+        available_balance=3000.0,
+        order_statement=1,
     )
     # Jan 1: income AFTER the start nómina on same day (no "nomina" in label) → INCLUDED
     create_movement(
@@ -291,10 +290,10 @@ def test_period_summary_includes_same_day_post_nomina_income(db_session) -> None
         account_id,
         500.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 1, 1, tzinfo=timezone.utc),
-        concepto="Ingreso posterior",
-        disponible=3500.0,
-        orden_extracto=2,
+        movement_date=date(2024, 1, 1),
+        concept="Ingreso posterior",
+        available_balance=3500.0,
+        order_statement=2,
     )
     # Jan 20: another income later in period → INCLUDED
     create_movement(
@@ -302,10 +301,10 @@ def test_period_summary_includes_same_day_post_nomina_income(db_session) -> None
         account_id,
         200.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 1, 20, tzinfo=timezone.utc),
-        concepto="Freelance",
-        disponible=3700.0,
-        orden_extracto=3,
+        movement_date=date(2024, 1, 20),
+        concept="Freelance",
+        available_balance=3700.0,
+        order_statement=3,
     )
     db_session.commit()
 
@@ -348,20 +347,20 @@ def test_period_summary_open_ended_period(db_session) -> None:
         account_id,
         100.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 2, 5, 0, 0, tzinfo=timezone.utc),
-        concepto="Some income",
-        disponible=100.0,
-        orden_extracto=1,
+        movement_date=date(2024, 2, 5),
+        concept="Some income",
+        available_balance=100.0,
+        order_statement=1,
     )
     create_movement(
         db_session,
         account_id,
         -50.0,
         MovementType.GASTO,
-        fecha=datetime(2024, 2, 10, 0, 0, tzinfo=timezone.utc),
-        concepto="Some expense",
-        disponible=50.0,
-        orden_extracto=2,
+        movement_date=date(2024, 2, 10),
+        concept="Some expense",
+        available_balance=50.0,
+        order_statement=2,
     )
     db_session.commit()
 
@@ -384,21 +383,21 @@ def test_period_summary_bounded_by_next_nomina(db_session) -> None:
         account_id,
         1000.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc),
-        concepto="Nómina",
-        disponible=1000.0,
-        orden_extracto=1,
+        movement_date=date(2024, 1, 1),
+        concept="Nómina",
+        available_balance=1000.0,
+        order_statement=1,
     )
-    # Movement in period (negative importe per DB convention)
+    # Movement in period (negative amount per DB convention)
     create_movement(
         db_session,
         account_id,
         -200.0,
         MovementType.GASTO,
-        fecha=datetime(2024, 1, 15, 0, 0, tzinfo=timezone.utc),
-        concepto="Groceries",
-        disponible=800.0,
-        orden_extracto=2,
+        movement_date=date(2024, 1, 15),
+        concept="Groceries",
+        available_balance=800.0,
+        order_statement=2,
     )
     # Next nómina on Feb 1 (closes the period)
     create_movement(
@@ -406,10 +405,10 @@ def test_period_summary_bounded_by_next_nomina(db_session) -> None:
         account_id,
         1000.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 2, 1, 0, 0, tzinfo=timezone.utc),
-        concepto="Nómina February",
-        disponible=1800.0,
-        orden_extracto=3,
+        movement_date=date(2024, 2, 1),
+        concept="Nómina February",
+        available_balance=1800.0,
+        order_statement=3,
     )
     # Movement after period end (should not be included)
     create_movement(
@@ -417,10 +416,10 @@ def test_period_summary_bounded_by_next_nomina(db_session) -> None:
         account_id,
         -300.0,
         MovementType.GASTO,
-        fecha=datetime(2024, 2, 5, 0, 0, tzinfo=timezone.utc),
-        concepto="Other expense",
-        disponible=1500.0,
-        orden_extracto=4,
+        movement_date=date(2024, 2, 5),
+        concept="Other expense",
+        available_balance=1500.0,
+        order_statement=4,
     )
     db_session.commit()
 
@@ -444,10 +443,10 @@ def test_period_summary_nomina_without_accent(db_session) -> None:
         account_id,
         1000.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc),
-        concepto="Salary January",  # No accent
-        disponible=1000.0,
-        orden_extracto=1,
+        movement_date=date(2024, 1, 1),
+        concept="Salary January",  # No accent
+        available_balance=1000.0,
+        order_statement=1,
     )
     # Next "nomina" without accent
     create_movement(
@@ -455,10 +454,10 @@ def test_period_summary_nomina_without_accent(db_session) -> None:
         account_id,
         1000.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 2, 1, 0, 0, tzinfo=timezone.utc),
-        concepto="nomina February",  # Lowercase, no accent
-        disponible=2000.0,
-        orden_extracto=2,
+        movement_date=date(2024, 2, 1),
+        concept="nomina February",  # Lowercase, no accent
+        available_balance=2000.0,
+        order_statement=2,
     )
     db_session.commit()
 
@@ -479,20 +478,20 @@ def test_period_summary_rounds_monetary_values(db_session) -> None:
         account_id,
         1000.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc),
-        concepto="Nómina",
-        disponible=1000.0,
-        orden_extracto=1,
+        movement_date=date(2024, 1, 1),
+        concept="Nómina",
+        available_balance=1000.0,
+        order_statement=1,
     )
     create_movement(
         db_session,
         account_id,
         -3232.239999999999,
         MovementType.GASTO,
-        fecha=datetime(2024, 1, 15, 0, 0, tzinfo=timezone.utc),
-        concepto="Big expense",
-        disponible=-2232.239999999999,
-        orden_extracto=2,
+        movement_date=date(2024, 1, 15),
+        concept="Big expense",
+        available_balance=-2232.239999999999,
+        order_statement=2,
     )
     db_session.commit()
 
@@ -511,8 +510,8 @@ def test_period_summary_same_day_as_closing_nomina(db_session) -> None:
     """A movement on the same calendar day as the closing nómina but chronologically
     before the salary credit IS included in the period.
 
-    orden_extracto is the source of chronological truth. The same-day income has
-    a lower orden_extracto (chronologically earlier) than the closing nómina.
+    order_statement is the source of chronological truth. The same-day income has
+    a lower order_statement (chronologically earlier) than the closing nómina.
     """
     account_id = create_account(db_session)
     start = date(2024, 2, 1)
@@ -523,43 +522,43 @@ def test_period_summary_same_day_as_closing_nomina(db_session) -> None:
         account_id,
         1000.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 2, 1, 0, 0, tzinfo=timezone.utc),
-        concepto="Nómina February",
-        disponible=1000.0,
-        orden_extracto=1,
+        movement_date=date(2024, 2, 1),
+        concept="Nómina February",
+        available_balance=1000.0,
+        order_statement=1,
     )
-    # Feb 10: gasto (disponible after: 600.0)
+    # Feb 10: expense (available_balance after: 600.0)
     create_movement(
         db_session,
         account_id,
         -400.0,
         MovementType.GASTO,
-        fecha=datetime(2024, 2, 10, 0, 0, tzinfo=timezone.utc),
-        concepto="Groceries",
-        disponible=600.0,
-        orden_extracto=2,
+        movement_date=date(2024, 2, 10),
+        concept="Groceries",
+        available_balance=600.0,
+        order_statement=2,
     )
-    # Mar 1: same-day income (chronologically BEFORE the closing nómina → lower orden_extracto)
+    # Mar 1: same-day income (chronologically BEFORE the closing salary → lower order_statement)
     create_movement(
         db_session,
         account_id,
         591.11,
         MovementType.INGRESO,
-        fecha=datetime(2024, 3, 1, 10, 0, tzinfo=timezone.utc),
-        concepto="Refund",
-        disponible=591.11,
-        orden_extracto=3,
+        movement_date=date(2024, 3, 1),
+        concept="Refund",
+        available_balance=591.11,
+        order_statement=3,
     )
-    # Mar 1: closing nómina (chronologically AFTER the income → higher orden_extracto)
+    # Mar 1: closing salary (chronologically AFTER the income → higher order_statement)
     create_movement(
         db_session,
         account_id,
         1000.0,
         MovementType.INGRESO,
-        fecha=datetime(2024, 3, 1, 11, 0, tzinfo=timezone.utc),
-        concepto="Nómina March",
-        disponible=1600.0,
-        orden_extracto=4,
+        movement_date=date(2024, 3, 1),
+        concept="Nómina March",
+        available_balance=1600.0,
+        order_statement=4,
     )
     db_session.commit()
 

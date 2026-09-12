@@ -55,8 +55,8 @@ class PiggyBank(Base):
 class MovementPiggyBank(Base):
     __tablename__ = "movements_piggy_banks"
 
-    movement_id: Mapped[int] = mapped_column(
-        ForeignKey("movements.id", ondelete="CASCADE"), primary_key=True
+    movement_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("movements.id", ondelete="CASCADE"), primary_key=True
     )
     piggy_bank_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("piggy_banks.id", ondelete="CASCADE"), primary_key=True

@@ -1,6 +1,6 @@
 import unicodedata
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from typing import Annotated
 
 from fastapi import Depends
@@ -45,47 +45,46 @@ class MovementsService:
         valid_rows = [r for r in rows if r.is_valid]
         invalid_rows = [r for r in rows if not r.is_valid]
 
-        last_disponible = self._get_stored_balance()
+        last_available_balance = self._get_stored_balance()
 
-        sorted_rows = sorted(
-            valid_rows, key=lambda r: r.fecha_movimiento or datetime.min, reverse=True
-        )
+        sorted_rows = sorted(valid_rows, key=lambda r: r.movement_date or date.min, reverse=True)
         deduped_rows = self._dedupe_within_file(sorted_rows)
 
         existing_keys = self._get_existing_keys(deduped_rows)
         new_rows = [r for r in deduped_rows if self._row_key(r) not in existing_keys]
         skipped_in_db = [r for r in deduped_rows if self._row_key(r) in existing_keys]
 
-        first_balance = valid_rows[0].disponible if valid_rows else None
-        available_balance = first_balance if first_balance is not None else (last_disponible or 0.0)
+        first_balance = valid_rows[0].available_balance if valid_rows else None
+        available_balance = (
+            first_balance if first_balance is not None else (last_available_balance or 0.0)
+        )
 
         inserted_movements: list[MovementResponse] = []
         skipped_count = len(skipped_in_db) + len(invalid_rows)
 
-        max_existing = self._get_max_orden_extracto()
-        next_orden = max_existing + len(new_rows)
+        max_existing = self._get_max_order_statement()
+        next_order = max_existing + len(new_rows)
 
         for row in new_rows:
-            assert row.importe is not None, "Importe was validated as non-None"
+            assert row.amount is not None, "Importe was validated as non-None"
             movement_create = MovementCreate(
-                fecha_movimiento=row.fecha_movimiento or datetime.now(timezone.utc),
-                concepto=self.validator.combine_concept(row),
-                importe=row.importe or 0.0,
-                tipo=MovementType(self.validator.determine_movement_type(row.importe or 0.0)),
-                disponible=row.disponible or 0.0,
+                movement_date=row.movement_date or date.today(),
+                concept=self.validator.combine_concept(row),
+                amount=row.amount or 0.0,
+                type=MovementType(self.validator.determine_movement_type(row.amount or 0.0)),
+                available_balance=row.available_balance or 0.0,
             )
 
             movement = Movement(
                 account_id=self.account_id,
-                fecha_movimiento=movement_create.fecha_movimiento,
-                concepto=movement_create.concepto,
-                importe=movement_create.importe,
-                tipo=movement_create.tipo,
-                disponible=movement_create.disponible,
-                orden_extracto=next_orden,
-                expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+                movement_date=movement_create.movement_date,
+                concept=movement_create.concept,
+                amount=movement_create.amount,
+                type=movement_create.type,
+                available_balance=movement_create.available_balance,
+                order_statement=next_order,
             )
-            next_orden -= 1
+            next_order -= 1
 
             self.db.add(movement)
             self.db.flush()
@@ -105,10 +104,8 @@ class MovementsService:
 
     @staticmethod
     def _row_key(row: MovementRow) -> tuple:
-        fecha = row.fecha_movimiento
-        if fecha is not None and fecha.tzinfo is not None:
-            fecha = fecha.astimezone(timezone.utc).replace(tzinfo=None)
-        return (fecha, row.importe, row.disponible)
+        md = row.movement_date
+        return (md, row.amount, row.available_balance)
 
     def _dedupe_within_file(self, rows: list[MovementRow]) -> list[MovementRow]:
         seen: set[tuple] = set()
@@ -123,21 +120,18 @@ class MovementsService:
     def _get_existing_keys(self, rows: list[MovementRow]) -> set[tuple]:
         if not rows:
             return set()
-        fechas = [r.fecha_movimiento for r in rows if r.fecha_movimiento is not None]
-        if not fechas:
+        movement_dates = [r.movement_date for r in rows if r.movement_date is not None]
+        if not movement_dates:
             return set()
         stmt = (
-            select(Movement.fecha_movimiento, Movement.importe, Movement.disponible)
+            select(Movement.movement_date, Movement.amount, Movement.available_balance)
             .where(Movement.account_id == self.account_id)
-            .where(Movement.fecha_movimiento.in_(fechas))
+            .where(Movement.movement_date.in_(movement_dates))
         )
         result = self.db.execute(stmt).all()
         keys: set[tuple] = set()
         for r in result:
-            fecha = r.fecha_movimiento
-            if fecha.tzinfo is not None:
-                fecha = fecha.astimezone(timezone.utc).replace(tzinfo=None)
-            keys.add((fecha, r.importe, r.disponible))
+            keys.add((r.movement_date, r.amount, r.available_balance))
         return keys
 
     def _get_stored_balance(self) -> float | None:
@@ -145,10 +139,10 @@ class MovementsService:
             return None
         return AccountBalanceService(self.db).get_balance(self.account_id)
 
-    def _get_max_orden_extracto(self) -> int:
+    def _get_max_order_statement(self) -> int:
         if self.account_id is None:
             return 0
-        stmt = select(func.coalesce(func.max(Movement.orden_extracto), 0)).where(
+        stmt = select(func.coalesce(func.max(Movement.order_statement), 0)).where(
             Movement.account_id == self.account_id
         )
         return int(self.db.execute(stmt).scalar_one())
@@ -178,19 +172,19 @@ class MovementsService:
 
         stmt = (
             select(
-                Movement.tipo,
-                func.sum(Movement.importe).label("total_amount"),
+                Movement.type,
+                func.sum(Movement.amount).label("total_amount"),
                 func.count().label("movement_count"),
             )
             .where(Movement.account_id == account_id)
-            .group_by(Movement.tipo)
+            .group_by(Movement.type)
         )
         results = self.db.execute(stmt).all()
 
         totals_by_type: dict[MovementType, MovementTypeTotals] = {}
         for row in results:
-            totals_by_type[row.tipo] = MovementTypeTotals(
-                type=row.tipo,
+            totals_by_type[row.type] = MovementTypeTotals(
+                type=row.type,
                 total_amount=row.total_amount or 0.0,
                 count=row.movement_count,
             )
@@ -220,11 +214,11 @@ class MovementsService:
         the period is open-ended (period_end is null).
 
         The closing nómina is the first movement strictly after start_date whose
-        normalized concepto contains "nomina", ordered by orden_extracto
+        normalized concept contains "nomina", ordered by order_statement
         (the single source of chronological truth).
 
         The period begins strictly after the start-date nómina for income: the
-        salary movement and any INGRESO with orden_extracto less than or equal to
+        salary movement and any INGRESO with order_statement less than or equal to
         it are excluded. GASTO movements on start_date remain included.
         Expense totals are reported as positive numbers (absolute sum).
 
@@ -249,43 +243,40 @@ class MovementsService:
             raise ValueError("Account not found")
 
         # Find the closing nómina: first movement after start_date ordered by
-        # orden_extracto (the single source of chronological truth).
-        next_day = datetime.combine(start_date + timedelta(days=1), datetime.min.time()).replace(
-            tzinfo=timezone.utc
-        )
+        # order_statement (the single source of chronological truth).
+        next_day = start_date + timedelta(days=1)
         stmt_next_nomina = (
             select(Movement)
             .where(Movement.account_id == account_id)
-            .where(Movement.fecha_movimiento >= next_day)
-            .order_by(Movement.orden_extracto)
+            .where(Movement.movement_date >= next_day)
+            .order_by(Movement.order_statement)
         )
         all_movements = self.db.execute(stmt_next_nomina).scalars().all()
 
         closing_nomina: Movement | None = None
         period_end: date | None = None
         for m in all_movements:
-            if "nomina" in self._normalize_concepto(m.concepto):
+            if "nomina" in self._normalize_concept(m.concept):
                 closing_nomina = m
-                period_end = m.fecha_movimiento.date()
+                period_end = m.movement_date
                 break
 
-        # Query all movements from start_date onwards, ordered by orden_extracto
+        # Query all movements from start_date onwards, ordered by order_statement
         # (the single source of chronological truth).
-        start_dt = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
         query = (
             select(Movement)
             .where(Movement.account_id == account_id)
-            .where(Movement.fecha_movimiento >= start_dt)
-            .order_by(Movement.orden_extracto)
+            .where(Movement.movement_date >= start_date)
+            .order_by(Movement.order_statement)
         )
         movements_in_period = self.db.execute(query).scalars().all()
 
         # If a closing nómina exists, keep only movements that precede it
-        # chronologically (break when we reach the closing nómina's orden_extracto).
+        # chronologically (break when we reach the closing nómina's order_statement).
         if closing_nomina is not None:
             filtered = []
             for m in movements_in_period:
-                if m.orden_extracto == closing_nomina.orden_extracto:
+                if m.order_statement == closing_nomina.order_statement:
                     break
                 filtered.append(m)
         else:
@@ -294,7 +285,7 @@ class MovementsService:
         # Exclude the nómina at start_date from income (the period-start salary).
         start_date_nomina = None
         for m in filtered:
-            normalized = self._normalize_concepto(m.concepto)
+            normalized = self._normalize_concept(m.concept)
             if "nomina" in normalized:
                 start_date_nomina = m
                 break
@@ -303,8 +294,8 @@ class MovementsService:
             filtered = [
                 m
                 for m in filtered
-                if m.tipo != MovementType.INGRESO
-                or m.orden_extracto > start_date_nomina.orden_extracto
+                if m.type != MovementType.INGRESO
+                or m.order_statement > start_date_nomina.order_statement
             ]
 
         income_total = 0.0
@@ -313,14 +304,14 @@ class MovementsService:
         expense_count = 0
 
         for m in filtered:
-            if m.tipo == MovementType.INGRESO:
-                income_total += m.importe
+            if m.type == MovementType.INGRESO:
+                income_total += m.amount
                 income_count += 1
-            elif m.tipo == MovementType.GASTO:
-                expense_total += abs(m.importe)
+            elif m.type == MovementType.GASTO:
+                expense_total += abs(m.amount)
                 expense_count += 1
 
-        remaining_balance = round(filtered[-1].disponible, 2) if filtered else 0.0
+        remaining_balance = round(filtered[-1].available_balance, 2) if filtered else 0.0
 
         return PeriodSummaryResponse(
             account_id=account_id,
@@ -334,9 +325,9 @@ class MovementsService:
         )
 
     @staticmethod
-    def _normalize_concepto(concepto: str) -> str:
-        """Normalize concepto by lowercasing and stripping accents."""
-        nfkd = unicodedata.normalize("NFKD", concepto.lower())
+    def _normalize_concept(concept: str) -> str:
+        """Normalize concept by lowercasing and stripping accents."""
+        nfkd = unicodedata.normalize("NFKD", concept.lower())
         return "".join(c for c in nfkd if not unicodedata.combining(c))
 
 

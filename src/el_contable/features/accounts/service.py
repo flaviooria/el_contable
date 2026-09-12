@@ -35,7 +35,7 @@ class AccountService:
 
     def get_piggy_bank_balance(self, piggy_bank_id: uuid.UUID) -> float:
         stmt = (
-            select(func.coalesce(func.sum(Movement.importe), 0.0))
+            select(func.coalesce(func.sum(Movement.amount), 0.0))
             .select_from(MovementPiggyBank)
             .join(Movement, MovementPiggyBank.movement_id == Movement.id)
             .where(MovementPiggyBank.piggy_bank_id == piggy_bank_id)
@@ -78,7 +78,7 @@ class AccountService:
         return result
 
     def link_movement_to_piggy_bank(
-        self, movement_id: int, piggy_bank_id: uuid.UUID
+        self, movement_id: uuid.UUID, piggy_bank_id: uuid.UUID
     ) -> MovementPiggyBank:
         link = MovementPiggyBank(
             movement_id=movement_id,

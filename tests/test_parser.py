@@ -1,5 +1,3 @@
-import polars as pl
-
 from el_contable.features.movements.parser import MovementsParser, ParserError
 
 CSV_CONTENT = b"Fecha,Concepto,Movimiento,Importe,Disponible\n2024-01-01,Sueldo,Empresa X,1500,2500\n2024-01-02,Renta,, -50,2450\n"
@@ -11,10 +9,10 @@ def test_parse_valid_csv() -> None:
     assert len(rows) == 2
     assert rows[0].is_valid
     assert rows[0].fecha == "2024-01-01"
-    assert rows[0].fecha_movimiento is not None
-    assert rows[0].importe == 1500.0
+    assert rows[0].movement_date is not None
+    assert rows[0].amount == 1500.0
     assert rows[1].is_valid
-    assert rows[1].importe == -50.0
+    assert rows[1].amount == -50.0
 
 
 def test_parse_missing_fecha_marks_invalid() -> None:
@@ -44,12 +42,3 @@ def test_parse_missing_required_column_raises() -> None:
         assert "Missing required columns" in str(exc)
     else:
         raise AssertionError("Expected ParserError to be raised")
-
-
-def test_parse_date_with_timezone() -> None:
-    rows = pl.read_csv(b"Fecha,Concepto,Importe,Disponible\n2024-01-01,Sueldo,100,100\n")
-
-    parsed_rows = MovementsParser()._process_dataframe(rows)
-    assert parsed_rows[0].fecha == "2024-01-01"
-    assert parsed_rows[0].fecha_movimiento is not None
-    assert parsed_rows[0].fecha_movimiento.tzinfo is not None

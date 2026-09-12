@@ -3,7 +3,7 @@
 ## Purpose
 
 Enable the user to upload Excel/CSV files containing financial transactions, validate them against existing transactions using
-a unique key strategy, and store them temporarily for subsequent processing.
+a unique key strategy, and store them for subsequent processing.
 
 ## Requirements
 
@@ -27,7 +27,7 @@ The system SHALL only accept files with `.xlsx` or `.csv` extension.
 
 The system SHALL extract the following fields from each row in the file:
 
-- `Fecha`: date of the movement (REQUIRED, invalid if missing)
+- `Fecha`: date of the movement (REQUIRED, invalid if missing) — parsed as a date-only value
 - `Concepto`: payment type (e.g., "Transferencia", "Pago servicios")
 - `Movimiento`: additional details (to whom, what it is) (OPTIONAL, can be empty)
 - `Importe`: movement amount (positive = income, negative = expense/withdrawal)
@@ -37,9 +37,9 @@ The system SHALL extract the following fields from each row in the file:
 
 - GIVEN fields `Concepto` and `Movimiento` exist
 - WHEN processing the movement
-- THEN concatenate as `concepto` = "Concepto - Movimiento"
-- OR if `Movimiento` is empty: `concepto` = "Concepto"
-- AND use `Importe` to determine `tipo` (positive = "ingreso", negative = "gasto")
+- THEN concatenate as `concept` = "Concepto - Movimiento"
+- OR if `Movimiento` is empty: `concept` = "Concepto"
+- AND use `Importe` to determine `type` (positive = "ingreso", negative = "gasto")
 
 #### Scenario: Missing Fecha field
 
@@ -50,18 +50,18 @@ The system SHALL extract the following fields from each row in the file:
 
 ### Requirement: Duplicate validation - Unique key strategy
 
-The system SHALL deduplicate movements using the composite key ``(fecha_movimiento, importe, disponible)``.
+The system SHALL deduplicate movements using the composite key `(movement_date, amount, available_balance)`.
 
 #### Scenario: Within-file duplicate
 
-- GIVEN a file contains two or more rows with identical ``fecha_movimiento``, ``importe``, and ``disponible``
+- GIVEN a file contains two or more rows with identical `movement_date`, `amount`, and `available_balance`
 - WHEN processing the file
 - THEN keep only the first occurrence
 - AND skip all subsequent duplicates
 
 #### Scenario: Duplicate across uploads
 
-- GIVEN a row already exists in the database with matching ``fecha_movimiento``, ``importe``, and ``disponible``
+- GIVEN a row already exists in the database with matching `movement_date`, `amount`, and `available_balance`
 - WHEN a new file is uploaded containing that same row
 - THEN skip that row
 - AND do not insert a duplicate
@@ -74,24 +74,31 @@ The system SHALL deduplicate movements using the composite key ``(fecha_movimien
 
 ### Requirement: Ascending order by date
 
-The system SHALL insert all movements in ascending order by ``fecha_movimiento``, regardless of the order in which they appear in the uploaded file.
+The system SHALL insert all movements in ascending order by `movement_date`, regardless of the order in which they appear in the uploaded file.
 
 #### Scenario: File with unsorted dates
 
 - GIVEN a file contains rows in a random date order
 - WHEN processing the file
-- THEN insert all rows sorted by ``fecha_movimiento`` ascending
+- THEN insert all rows sorted by `movement_date` ascending
 
-### Requirement: Temporary storage
+### Requirement: Movement storage
 
-The system SHALL store movements in the `movements` table with an expiration date to comply with privacy policies.
+The system SHALL store movements in the `movements` table.
 
 #### Scenario: Insert valid movements
 
 - GIVEN a file with valid and non-duplicate movements
 - WHEN all validations pass
 - THEN insert into `movements` table
-- AND save fields: `fecha_movimiento`, `concepto`, `importe`, `tipo`, `disponible`, `created_at`, `expires_at`
+- AND save fields: `id` (UUID), `account_id`, `movement_date`, `concept`, `amount`, `type`, `available_balance`, `created_at`, `order_statement`
+
+#### Scenario: Movement identifiers are UUIDs
+
+- GIVEN a movement has been inserted
+- WHEN the movement is returned by an API response
+- THEN its `id` is a UUID
+- AND no `expires_at` field is present
 
 ### Requirement: Template endpoint
 

@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum, Float, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import (
+    Date,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -18,27 +28,26 @@ if TYPE_CHECKING:
 class Movement(Base):
     __tablename__ = "movements"
     __table_args__ = (
-        UniqueConstraint("account_id", "orden_extracto", name="uq_movements_account_orden"),
+        UniqueConstraint(
+            "account_id",
+            "order_statement",
+            name="uq_movements_account_order_statement",
+        ),
     )
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     account_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False
     )
-    fecha_movimiento: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    concepto: Mapped[str] = mapped_column(String(500), nullable=False)
-    importe: Mapped[float] = mapped_column(Float, nullable=False)
-    tipo: Mapped[MovementType] = mapped_column(Enum(MovementType), nullable=False)
-    disponible: Mapped[float] = mapped_column(Float, nullable=False)
+    movement_date: Mapped[date] = mapped_column(Date, nullable=False)
+    concept: Mapped[str] = mapped_column(String(500), nullable=False)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    type: Mapped[MovementType] = mapped_column(Enum(MovementType), nullable=False)
+    available_balance: Mapped[float] = mapped_column(Float, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )
-    expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc) + timedelta(days=30),
-        nullable=False,
-    )
-    orden_extracto: Mapped[int] = mapped_column(Integer, nullable=False)
+    order_statement: Mapped[int] = mapped_column(Integer, nullable=False)
     account: Mapped["Account"] = relationship("Account", back_populates="movements")
     piggy_banks: Mapped[list[PiggyBank]] = relationship(
         "PiggyBank", secondary="movements_piggy_banks", back_populates="movements"

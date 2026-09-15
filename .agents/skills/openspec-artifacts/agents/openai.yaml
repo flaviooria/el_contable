@@ -1,0 +1,3 @@
+interface:
+  display_name: "OpenSpec Artifacts"
+  short_description: "Author OpenSpec plans without the CLI"

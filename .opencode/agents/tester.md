@@ -1,0 +1,1 @@
+../../.agents/roles/tester.md

@@ -1,0 +1,3 @@
+interface:
+  display_name: "Propose Change"
+  short_description: "Plan OpenSpec changes before implementation"

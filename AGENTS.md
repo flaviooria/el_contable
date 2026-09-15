@@ -43,6 +43,22 @@ Human approval is required before:
 - making a breaking API change;
 - resolving ambiguity that materially affects product behaviour.
 
+## 📋 Work Management
+
+`BACKLOG.md` is the source of truth for project work and orchestration state.
+
+- The Leader owns work-item lifecycle transitions.
+- Backend, Tester, and Reviewer must not mutate work-item state.
+- Use the `work-intake` skill to select, validate, and update work items.
+- A work item must reach `awaiting-approval` before implementation.
+- Implementation requires explicit human approval.
+- Record generated OpenSpec artifacts and ADRs as paths in the corresponding work item.
+- Record the final commit before marking work as `done`.
+
+Expected lifecycle:
+
+`pending → planning → awaiting-approval → approved → implementing → testing → reviewing → ready-to-commit → done`
+
 ## Documentation Rules
 Do not load all project documentation by default.
 Use progressive disclosure:
@@ -52,7 +68,18 @@ Use progressive disclosure:
 3. Read only the documentation relevant to that task.
 4. Inspect implementation details only when required.
 
-When creating, deleting, moving, or renaming documentation under `docs/` or `openspec/specs/`, regenerate the Documentation Map.
+### Context Efficiency
+
+Minimize context loading.
+
+- Do not preload project documentation.
+- Read only the files required for the current responsibility.
+- Prefer canonical sources over summaries copied into prompts or other documents.
+- Do not load `openspec/changes/` globally. Active change artifacts are discovered through the selected `BACKLOG.md` work item.
+- Do not read unrelated ADRs, specifications, or feature documentation.
+- When a deterministic script can answer a structural question, prefer running the script instead of loading the entire source document into context.
+
+When creating, deleting, moving, or renaming documentation under `docs/` or `openspec/specs/`, regenerate the Documentation Map with the `documentation-map` skill.
 Do not manually edit the generated section between `DOCS_MAP_START` and `DOCS_MAP_END`.
 
 ## Documentation Map
@@ -60,36 +87,35 @@ Do not manually edit the generated section between `DOCS_MAP_START` and `DOCS_MA
 ```text
 docs/
 ├── ARCHITECTURE.md
-│   # System architecture, boundaries, dependencies, and design constraints.
-├── FUNCTIONAL.md
-│   # Product capabilities and stable business rules.
+│   # System architecture, aggregate boundaries, dependencies, transaction ownership, and design constraints.
 ├── code_style.md
-│   # Python coding conventions and project style rules.
+├── FUNCTIONAL.md
 └── decisions/
-    └── 001-movements-upload-strategy.md
-        # Movement import and deduplication strategy.
+    ├── 001-movements-upload-strategy.md
+    ├── 002-account-balance.md
+    ├── 003-account-and-piggy-bank-model.md
+    ├── 004-shared-declarative-base.md
+    ├── 005-period-summary.md
+    └── 006-movements-uuid-primary-key.md
 
 openspec/
-├── specs/
-│   └── upload_movements/
-│       └── spec.md
-│           # Detailed specification for the movement upload feature.
-└── changes/
-    └── upload-movements/
-        ├── proposal.md
-        │   # Intent and scope of the movement upload change.
-        └── tasks.md
-            # Implementation checklist for the movement upload change.
+└── specs/
+    ├── account_balance/
+    │   └── spec.md
+    ├── accounts/
+    │   └── spec.md
+    └── upload_movements/
+        └── spec.md
 ```
 <!-- DOCS_MAP_END -->
 
-
 ## Documentation Routing
+- Current work item and orchestration state → `BACKLOG.md` through the `work-intake` skill
+- Active change artifacts → paths recorded in the selected `BACKLOG.md` work item
 - Business rules or expected behaviour → `docs/FUNCTIONAL.md`
 - Architecture, module boundaries, or dependencies → `docs/ARCHITECTURE.md`
 - Writing or modifying Python code → `docs/code_style.md`
 - Movement uploads → `openspec/specs/upload_movements/spec.md`
-- Movement upload proposal and tasks → `openspec/changes/upload-movements/`
 - Understanding an architectural decision → relevant file under `docs/decisions/`
 
 ## Development Rules

@@ -1,0 +1,3 @@
+interface:
+  display_name: "Commit Change"
+  short_description: "Commit only approved and verified changes"

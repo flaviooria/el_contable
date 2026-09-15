@@ -1,0 +1,126 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "default_agent": "leader",
+  "agent": {
+    "leader": {
+      "description": "Agente orquestador principal. Coordina el flujo de trabajo delegando implementación, tests y revisión a los subagentes correspondientes, gestiona cambios de OpenSpec y hace commits/push controlados.",
+      "mode": "primary",
+      "permission": {
+        "edit": {
+          "*": "deny",
+          "BACKLOG.md": "allow",
+          "docs/decisions/**": "allow",
+          "openspec/changes/**": "allow"
+        },
+        "bash": {
+          "*": "deny",
+          "uv run python .agents/skills/openspec-artifacts/scripts/validate_change.py *": "allow",
+          "uv run python .agents/skills/work-intake/scripts/backlog.py *": "allow",
+          "uv run python .agents/skills/documentation-map/scripts/update_docs_map.py *": "allow",
+          "git status*": "allow",
+          "git diff*": "allow",
+          "git log*": "allow",
+          "git rev-parse*": "allow",
+          "git add": "allow",
+          "git add *": "allow",
+          "git commit": "allow",
+          "git commit *": "allow",
+          "git push*": "deny"
+        },
+        "skill": {
+          "*": "deny",
+          "propose-change": "allow",
+          "openspec-artifacts": "allow",
+          "commit-change": "allow",
+          "work-intake": "allow",
+          "architecture-decision": "allow",
+          "documentation-map": "allow"
+        },
+        "task": {
+          "*": "deny",
+          "backend": "allow",
+          "tester": "allow",
+          "reviewer": "allow"
+        },
+        "external_directory": "deny",
+        "question": "allow"
+      }
+    },
+    "backend": {
+      "description": "Subagente de implementación. Escribe y modifica código de producción (backend FastAPI/SQLAlchemy) sin tocar tests, documentación, configuración de agentes ni especificaciones. No puede hacer commit ni push.",
+      "mode": "subagent",
+      "model": "opencode-go/minimax-m2.7",
+      "permission": {
+        "edit": {
+          "*": "allow",
+          "AGENTS.md": "deny",
+          ".agents/**": "deny",
+          ".opencode/**": "deny",
+          "opencode.json": "deny",
+          "opencode.jsonc": "deny",
+          "docs/**": "deny",
+          "openspec/**": "deny",
+          "tests/**": "deny",
+          "src/**/tests/**": "deny",
+          "src/**/test_*.py": "deny",
+          "src/**/tests.py": "deny"
+        },
+        "bash": {
+          "*": "allow",
+          "git commit*": "deny",
+          "git push*": "deny"
+        },
+        "skill": {
+          "*": "deny",
+          "fastapi-api": "allow"
+        },
+        "task": "deny",
+        "external_directory": "deny"
+      }
+    },
+    "tester": {
+      "description": "Subagente de pruebas. Escribe y ejecuta tests (pytest, ruff, mypy) y solo puede editar archivos dentro de las rutas de tests. No modifica código de producción ni hace commits.",
+      "mode": "subagent",
+      "model": "opencode-go/minimax-m2.7",
+      "permission": {
+        "edit": {
+          "*": "deny",
+          "tests/**": "allow",
+          "src/**/tests/**": "allow",
+          "src/**/test_*.py": "allow",
+          "src/**/tests.py": "allow"
+        },
+        "bash": {
+          "*": "deny",
+          "make checks": "allow",
+          "uv run pytest*": "allow",
+          "uv run ruff*": "allow",
+          "uv run mypy*": "allow"
+        },
+        "skill": {
+          "*": "deny",
+          "quality-gate": "allow"
+        },
+        "task": "deny",
+        "external_directory": "deny"
+      }
+    },
+    "reviewer": {
+      "description": "Subagente de revisión de solo lectura. Analiza el estado del repositorio, el diff y el historial, y valida cambios de OpenSpec sin poder editar archivos ni ejecutar comandos con efectos secundarios.",
+      "mode": "subagent",
+      "permission": {
+        "edit": "deny",
+        "bash": {
+          "*": "deny",
+          "uv run python .agents/skills/openspec-artifacts/scripts/validate_change.py *": "allow",
+          "git status*": "allow",
+          "git diff*": "allow",
+          "git log*": "allow"
+        },
+        "skill": "deny",
+        "task": "deny",
+        "external_directory": "deny"
+      }
+    }
+  }
+}

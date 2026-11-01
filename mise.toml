@@ -56,3 +56,15 @@ run = "docker compose up -d"
 [tasks.db-down]
 description = "Stop the PostgreSQL container"
 run = "docker compose down"
+
+[tasks.api-up]
+description = "Build and start the API container (runs migrations on boot)"
+run = "docker compose up -d --build"
+
+[tasks.api-down]
+description = "Stop the whole stack"
+run = "docker compose down"
+
+[tasks.api-logs]
+description = "Follow the API container logs"
+run = "docker compose logs -f api"

@@ -11,6 +11,25 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U el_contable -d el_contable"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    container_name: el_contable_api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://el_contable:el_contable@db:5432/el_contable
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./movements_files:/app/movements_files
 
 volumes:
   postgres_data:

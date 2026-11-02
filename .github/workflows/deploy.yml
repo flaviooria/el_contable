@@ -37,8 +37,8 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:${{ env.IMAGE_TAG }}
-            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/el-contable-api:${{ env.IMAGE_TAG }}
+            ghcr.io/el-contable-api:latest
 
   deploy:
     needs: build

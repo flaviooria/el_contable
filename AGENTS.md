@@ -90,6 +90,8 @@ docs/
 │   # System architecture, aggregate boundaries, dependencies, transaction ownership, and design constraints.
 ├── code_style.md
 ├── FUNCTIONAL.md
+├── runbook_tecnico.md
+│   # Runbook del despliegue continuo a VPS: credenciales, pasos por entorno y diagnóstico de fallos.
 └── decisions/
     ├── 001-movements-upload-strategy.md
     ├── 002-account-balance.md

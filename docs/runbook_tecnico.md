@@ -92,25 +92,70 @@ Verificado por inspección del VPS y del PC local.
 | Docker Engine | ✅ v29.9.2 |
 | Docker Compose | ✅ v5.6.1 (soporta `--env-file` múltiple) |
 | Red `proxy` externa | ✅ Existe (la usa Traefik) |
-| Repo clonado | ❌ **`/opt/apps/` está vacío** |
-| Clave para GitHub | ❌ **No existe** (`~/.ssh/` solo tiene `authorized_keys`) |
-| `known_hosts` de github.com | ❌ No existe |
-| `.env.prod` | ❌ No existe |
-| `movements_files/` | ❌ No existe |
+| Clave de deploy para GitHub | ✅ Generada: `~/.ssh/ghcr_deploykey` (600) |
+| `~/.ssh/config` | ✅ `IdentityFile` + `IdentitiesOnly yes` |
+| `known_hosts` de github.com | ✅ ssh-rsa + ssh-ed25519 |
+| Directorio `/opt/apps/el_contable` | ✅ Creado, propiedad de `deploy` |
+| Repo git inicializado | ✅ `git init` + remoto `origin` |
+| Excludes de `.env*` | ✅ en `.git/info/exclude` |
+| `movements_files/` | ✅ Creado |
+| Clave registrada en GitHub | ❌ **Pendiente** (sección 5.2) |
+| Working tree del repo | ❌ Sin contenido (falta `git fetch`) |
+| `.env.prod` | ❌ No existe (sección 3.5) |
 
 ### Pendiente en GitHub
 
 | Elemento | Estado |
 |----------|--------|
+| Deploy key del repo | ❌ **Pendiente** (sección 5.2) |
 | Secret `VPS_DEPLOY_KEY` | ⚠️ Por confirmar (la clave `vps_deploy` del PC existe) |
-| Secret `VPS_KNOWN_HOSTS` | ⚠️ Por confirmar |
-| Secret `VPS_HOST` | ⚠️ Por confirmar |
-| Secret `VPS_USER` | ⚠️ Por confirmar |
+| Secret `VPS_KNOWN_HOSTS` | ⚠️ Por confirmar (comando en 6.3) |
+| Secret `VPS_HOST` | ⚠️ Por confirmar (`192.168.56.10`) |
+| Secret `VPS_USER` | ⚠️ Por confirmar (`deploy`) |
 | Secret `VPS_GHCR_USERNAME` | ⚠️ Por confirmar (debe ser `flaviooria`) |
 | Secret `VPS_GHCR_TOKEN` | ⚠️ Por crear (PAT clásico, scope `read:packages`) |
 | Variable `VPS_DEPLOY_PATH` | Opcional, default `/opt/apps/el_contable` |
-| Deploy key del repo | ⚠️ Solo si el repo es privado |
 | Visibilidad del paquete GHCR | ⚠️ Revisar tras el primer push |
+
+---
+
+## 2.1 Procedimiento de puesta en marcha (checklist ejecutable)
+
+Estado de avance real, verificado por ejecución de cada comando.
+
+```
+[✅] VPS: grupo docker, Docker, Compose v5, red proxy
+[✅] VPS: deploy key generada + ssh config + known_hosts
+[✅] VPS: repo inicializado + remoto origin + excludes
+[✅] VPS: movimientos_files/ creado
+[ ] GITHUB: registrar deploy key (5.2)              ← TÚ
+[ ] VPS: git fetch + reset --hard (3.4/5.5)         ← depende del anterior
+[ ] VPS: crear .env.prod (3.5)                      ← TÚ
+[ ] GITHUB: crear secrets (6.1-6.4)                 ← TÚ
+[ ] GITHUB: ejecutar workflow (8.2)
+[ ] GITHUB: paquete GHCR → Private (7.1)            ← TÚ
+```
+
+### Comandos de verificación
+
+```bash
+# ¿La deploy key funciona? (debe responder "Hi <owner>/el_contable!")
+ssh deploy-vps 'ssh -T git@github.com 2>&1 | head -2'
+
+# ¿El repo está sincronizado?
+ssh deploy-vps 'cd /opt/apps/el_contable && git log --oneline -1 && git status --short'
+
+# ¿Existe el .env.prod?
+ssh deploy-vps 'test -f /opt/apps/el_contable/.env.prod && echo OK || echo FALTA'
+
+# ¿Está el usuario en el grupo docker?
+ssh deploy-vps 'groups | grep -o docker || echo "SIN PERMISOS DOCKER"'
+
+# ¿El compose resuelve la imagen?
+ssh deploy-vps 'cd /opt/apps/el_contable && cp .env.prod .env.prod.test && \
+  IMAGE_TAG=sha-test docker compose -f compose.prod.yml --env-file .env.prod.test config && \
+  rm .env.prod.test'
+```
 
 ---
 
@@ -120,6 +165,8 @@ Verificado por inspección del VPS y del PC local.
 > Usa `ssh deploy-vps` desde el PC local para entrar.
 
 ### 3.1 Crear el directorio de despliegue
+
+**Ya ejecutado.**
 
 ```bash
 ssh deploy-vps
@@ -131,6 +178,8 @@ cd /opt/apps/el_contable
 
 ### 3.2 Crear el directorio de ficheros subidos
 
+**Ya ejecutado.**
+
 ```bash
 mkdir -p /opt/apps/el_contable/movements_files
 ```
@@ -139,6 +188,8 @@ El servicio `api` monta este directorio. Si no existe, Docker lo crearía como
 root y los ficheros quedarían fuera del control del usuario `deploy`.
 
 ### 3.3 Configurar el repositorio remoto
+
+**Ya ejecutado** (`git init` + `git remote add` + excludes).
 
 > Si aún no has clonado el repo (sección 3.4), el flujo es:
 > `git init` → `git remote add` → `git fetch` → `git reset --hard origin/main`.
@@ -162,14 +213,38 @@ cambios sin commitear. Los ficheros de entorno se ignoran **por repo** (no por
 printf '.env\n.env.prod\n.env.deploy\n' >> /opt/apps/el_contable/.git/info/exclude
 ```
 
-### 3.4 Clonar el repositorio
+### 3.4 Poblar el repositorio con el código
+
+**Pendiente**: requiere que la deploy key esté registrada (5.2) o que el repo
+sea público.
 
 ```bash
-cd /opt/apps
-rm -rf el_contable
-git clone git@github.com:flaviooria/el_contable.git el_contable
-cd el_contable
+ssh deploy-vps 'cd /opt/apps/el_contable && \
+  git fetch origin main && \
+  git reset --hard origin/main && \
+  git checkout -B main && \
+  git log --oneline -1'
 ```
+
+> Se usa `fetch` + `reset --hard` en lugar de `git clone` porque el repo ya está
+> inicializado, y porque deja el working tree exactamente en el estado que
+> espera `git pull --ff-only origin main` (que es lo que ejecuta el workflow).
+>
+> Equivalente si prefieres empezar de cero:
+>
+> ```bash
+> cd /opt/apps
+> rm -rf el_contable
+> git clone git@github.com:flaviooria/el_contable.git el_contable
+> cd el_contable
+> ```
+>
+> Con repo **privado**, ambas formas **fallan** hasta que configures la deploy
+> key (sección 5).
+>
+> Alternativa si prefieres que el workflow NO dependa de un clone de git en el
+> VPS: el workflow podría enviar el `compose.prod.yml` por `scp` en lugar de
+> hacer `git pull`. El diseño actual asume clone de git.
 
 > Con repo **privado** este `git clone` **falla** hasta que configures la
 > deploy key (sección 5). En ese caso, monta primero la deploy key (5.1–5.4) y
@@ -196,6 +271,14 @@ EOF
 chmod 600 /opt/apps/el_contable/.env.prod
 ```
 
+> El `DOMAIN` lo usan las etiquetas de Traefik del servicio `api`
+> (`Host(\`api.${DOMAIN}\`)`). Debe coincidir con el dominio real para el que
+> Traefik emite el certificado TLS.
+>
+> Este fichero **no lo crea ni lo actualiza el workflow**: el workflow solo lo
+> lee (`--env-file .env.prod`). Si cambias las credenciales de Postgres, hay
+> que editarlo a mano en el VPS.
+
 ### 3.6 Permisos
 
 ```bash
@@ -217,13 +300,22 @@ GitHub acepta lecturas anónimas de repos públicos. No hace falta deploy key.
 ssh deploy-vps 'ssh -T git@github.com 2>&1 | head -2'
 ```
 
-Si sale `Permission denied (publickey)` → **te falta la clave del host**. Fíjate en
-que el error sea `Host key verification failed` (falta `known_hosts`) y no
-`Permission denied` (falta la clave).
+> Estado actual: devuelve `Permission denied (publickey)` porque la deploy key
+> **aún no está registrada en GitHub** (sección 5.2). Es lo esperado.
+
+Hay que distinguir dos errores distintos:
+
+| Error | Causa | Solución |
+|-------|-------|----------|
+| `Host key verification failed` | Falta `known_hosts` de github.com | `ssh-keyscan github.com >> ~/.ssh/known_hosts` |
+| `Permission denied (publickey)` | La clave no está registrada en GitHub | Sección 5.2 |
+
+El `known_hosts` **ya está configurado** en este VPS:
 
 ```bash
-# Resolver el host key (primera conexión)
-ssh deploy-vps 'ssh-keyscan -t ed25519,rsa github.com >> ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts'
+ssh deploy-vps 'cut -d" " -f1,2 ~/.ssh/known_hosts'
+# github.com ssh-rsa
+# github.com ssh-ed25519
 ```
 
 ### 4.2 Verificar el pull
@@ -250,19 +342,34 @@ privilegio es una **deploy key de solo lectura**, asociada al repositorio.
 
 > La clave privada **nunca debe salir del VPS**. Solo se copia la `.pub`.
 
+**Ya ejecutado en este VPS.** La clave existe en `~/.ssh/ghcr_deploykey`:
+
+```bash
+ssh deploy-vps 'cat ~/.ssh/ghcr_deploykey.pub'
+```
+
+```
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIENlevjkRYFCWFcV2lTK+DFi35X229Md5Bq3AKXttV98 el-contable-vps-deploykey
+```
+
+Fingerprint: `SHA256:datTLxoDzDGCrhgT8Or7CTe4CuSkTzqESKkfm5U3Wq4`
+
+Para regenerarla desde cero (por ejemplo, si se sospecha exposición):
+
 ```bash
 ssh deploy-vps
 ssh-keygen -t ed25519 -C "el-contable-vps-deploykey" -f ~/.ssh/ghcr_deploykey -N ""
 cat ~/.ssh/ghcr_deploykey.pub
 ```
 
-Salida esperada:
-
-```
-ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... el-contable-vps-deploykey
-```
+> Regenerarla **invalida** la que estuviera registrada en GitHub: habría que
+> actualizar la deploy key allí también.
 
 ### 5.2 Registrar la clave pública en GitHub
+
+> ⏳ **PASO PENDIENTE.** Hasta que se complete, el `git pull` del VPS no puede
+> autenticarse ante GitHub. Con repo público funciona por lectura anónima, pero
+> la deploy key no estaría ejercitada.
 
 1. GitHub → repositorio `flaviooria/el_contable`
 2. **Settings** → **Deploy keys** → **Add deploy key**
@@ -271,6 +378,8 @@ ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... el-contable-vps-deploykey
 5. **NO** marques "Allow write access"
 
 ### 5.3 Configurar el uso de la clave en el VPS
+
+**Ya ejecutado.** `~/.ssh/config` contiene:
 
 ```bash
 cat > /home/deploy/.ssh/config <<'EOF'
@@ -293,18 +402,31 @@ provocar `too many authentication failures`).
 ssh deploy-vps 'ssh -T git@github.com 2>&1 | head -2'
 ```
 
-Salida esperada: `Hi <owner>/el_contable! You've successfully authenticated...`
+Salida esperada: `Hi flaviooria/el_contable! You've successfully authenticated...`
+
+> Con una deploy key, GitHub identifica al **repo**, no a la persona. Por eso el
+> mensaje dice `Hi flaviooria/el_contable!` en lugar de `Hi flaviooria!` (que
+> es lo que devuelve tu clave personal).
 
 Si sigue apareciendo `Permission denied (publickey)`, revisa que:
 - la clave pública en GitHub sea **exactamente** la del VPS,
 - `~/.ssh/config` tenga la ruta correcta,
 - los permisos sean `600` en la clave y `600` en el config.
 
-### 5.5 Verificar el pull
+### 5.5 Poblar el repo y verificar el pull
 
 ```bash
-ssh deploy-vps 'cd /opt/apps/el_contable && git fetch origin main && git pull --ff-only origin main && git log --oneline -1'
+ssh deploy-vps 'cd /opt/apps/el_contable && \
+  git fetch origin main && \
+  git reset --hard origin/main && \
+  git checkout -B main && \
+  git log --oneline -1 && \
+  git status --short'
 ```
+
+Salida esperada: el hash del último commit de `main` y **cero líneas** en
+`git status` (working tree limpio, requisito para que el `git pull --ff-only`
+del workflow no falle).
 
 ### 5.6 ¿Y si ya tengo mi clave personal en el VPS?
 
@@ -439,18 +561,33 @@ docker pull ghcr.io/flaviooria/el_contable:latest
 
 ### 8.1 Verificación previa
 
-```bash
-# 1. El VPS puede hacer pull
-ssh deploy-vps 'cd /opt/apps/el_contable && git fetch origin main'
+Todos estos comandos deben pasar **antes** de lanzar el workflow:
 
-# 2. El compose resuelve la imagen correctamente
+```bash
+# 1. La deploy key funciona (debe decir "Hi flaviooria/el_contable!")
+ssh deploy-vps 'ssh -T git@github.com 2>&1 | head -2'
+
+# 2. El VPS puede hacer pull y el working tree está limpio
+ssh deploy-vps 'cd /opt/apps/el_contable && git fetch origin main && git log --oneline -1 && git status --short'
+
+# 3. Existe el .env.prod
+ssh deploy-vps 'test -f /opt/apps/el_contable/.env.prod && echo OK || echo FALTA'
+
+# 4. El usuario tiene permisos de Docker
+ssh deploy-vps 'groups | grep -o docker || echo "SIN PERMISOS DOCKER"'
+
+# 5. El compose resuelve la imagen correctamente
 ssh deploy-vps 'cd /opt/apps/el_contable && cp .env.prod .env.prod.test && \
   IMAGE_TAG=sha-test docker compose -f compose.prod.yml --env-file .env.prod.test config && \
   rm .env.prod.test'
 
-# 3. Los secrets existen en GitHub
+# 6. Los secrets existen en GitHub
 # (Settings → Secrets and variables → Actions)
 ```
+
+> El paso 5 usa `.env.prod` y **no** `.env.example` a propósito: el servicio `db`
+> declara `env_file: .env.prod`, y Compose exige que ese fichero exista para
+> poder resolver la configuración.
 
 ### 8.2 Ejecutar el workflow
 

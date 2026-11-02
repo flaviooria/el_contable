@@ -74,32 +74,63 @@ distintos (Git vs. GHCR).
 
 Verificado por inspección del VPS y del PC local.
 
+> ### ⚠️ Existen DOS servidores distintos
+>
+> | Servidor | IP | Uso | Accesible desde GitHub Actions |
+> |----------|----|-----|-------------------------------|
+> | **VPS de producción** | `62.171.145.58` | Traefik + Postgres + API | ✅ Sí — puerto 22 abierto |
+> | **Lab local (Vagrant)** | `192.168.56.10` | `vps-lab`, pruebas en LAN | ❌ No — IP privada detrás de NAT |
+>
+> El secret `VPS_HOST` **debe** ser `62.171.145.58`. Con la IP del lab local el
+> runner falla con `Connection timed out` (ver sección 9).
+>
+> El lab local (`192.168.56.10`) sí tiene el setup completo de deploy key y
+> repo inicializado, pero **no** es el destino del despliegue.
+
 ### PC local
 
 | Elemento | Estado |
 |----------|--------|
-| Alias SSH `deploy-vps` | ✅ `deploy@192.168.56.10:22`, key `~/.ssh/vps_deploy` |
-| Alias SSH `admin-vps` | ✅ `admin@192.168.56.10:22`, key `~/.ssh/vps_admin` |
+| Alias SSH `deploy-vps` | ⚠️ Apunta al lab (`192.168.56.10`), **no** al VPS de producción |
+| Alias SSH `admin-vps` | ⚠️ Apunta al lab (`192.168.56.10`), **no** al VPS de producción |
+| Acceso al VPS de producción | ✅ `ssh -i ~/.ssh/vps_deploy deploy@62.171.145.58` |
+| Acceso admin al VPS de producción | ✅ `ssh -i ~/.ssh/vps_admin admin@62.171.145.58` (sudo pide password) |
 | `ssh git@github.com` | ✅ Autentica como `flaviooria` |
 | Remote `origin` | `git@github.com:flaviooria/el_contable.git` |
 
-### VPS (`deploy-vps`)
+### VPS de producción (`62.171.145.58`)
 
 | Elemento | Estado |
 |----------|--------|
 | Usuario `deploy` | ✅ uid=1002, grupos: `deploy, users, docker` |
 | Permisos Docker | ✅ **usuario `deploy` está en el grupo `docker`** |
+| Docker Engine | ✅ v29.9.1 |
+| Docker Compose | ✅ v5.6.0 (soporta `--env-file` múltiple) |
+| Red `proxy` externa | ✅ Existe (la usa Traefik v3.7) |
+| Contenedores activos | ✅ `traefik`, `socket-proxy` |
+| Repo en `/opt/apps/el_contable` | ✅ Clonado, commit `5bce56f`, working tree limpio |
+| **Propietario del repo** | ❌ **Es de `root`** → Git da `dubious ownership` y `deploy` no puede escribir en `.git` |
+| `known_hosts` de github.com | ✅ Configurado (ssh-rsa + ssh-ed25519) |
+| `.env.prod` | ✅ Existe con credenciales reales |
+| `movements_files/` | ❌ No existe |
+| `safe.directory` de git | ✅ Configurado |
+| Clave de deploy para GitHub | ❌ No existe en este servidor |
+
+### Lab local (`192.168.56.10`)
+
+| Elemento | Estado |
+|----------|--------|
+| Usuario `deploy` | ✅ uid=1002, grupos: `deploy, users, docker` |
 | Docker Engine | ✅ v29.9.2 |
-| Docker Compose | ✅ v5.6.1 (soporta `--env-file` múltiple) |
-| Red `proxy` externa | ✅ Existe (la usa Traefik) |
-| Clave de deploy para GitHub | ✅ Generada: `~/.ssh/ghcr_deploykey` (600) |
+| Docker Compose | ✅ v5.6.1 |
+| Red `proxy` externa | ✅ Existe |
+| Clave de deploy para GitHub | ✅ `~/.ssh/ghcr_deploykey` (600) |
 | `~/.ssh/config` | ✅ `IdentityFile` + `IdentitiesOnly yes` |
 | `known_hosts` de github.com | ✅ ssh-rsa + ssh-ed25519 |
-| Directorio `/opt/apps/el_contable` | ✅ Creado, propiedad de `deploy` |
 | Repo git inicializado | ✅ `git init` + remoto `origin` |
 | Excludes de `.env*` | ✅ en `.git/info/exclude` |
 | `movements_files/` | ✅ Creado |
-| Clave registrada en GitHub | ❌ **Pendiente** (sección 5.2) |
+| Clave registrada en GitHub | ❌ Pendiente (sección 5.2) |
 | Working tree del repo | ❌ Sin contenido (falta `git fetch`) |
 | `.env.prod` | ❌ No existe (sección 3.5) |
 
@@ -287,6 +318,49 @@ chmod 600 /home/deploy/.env.prod
 mkdir -p /home/deploy/.ssh && chmod 700 /home/deploy/.ssh
 ```
 
+### 3.7 Corregir el ownership del repo (requiere sudo)
+
+> ⏳ **PASO PENDIENTE en el VPS de producción.** El repo se clonó como `root`,
+> pero el workflow se conecta como `deploy`. Eso provoca dos fallos:
+> `detected dubious ownership in repository` y
+> `error: cannot open '.git/FETCH_HEAD': Permission denied`.
+
+El usuario `deploy` **no** puede hacer `chown` sobre ficheros de `root`. El
+cambio requiere `sudo`, es decir, un usuario con privilegios administrativos:
+
+```bash
+ssh admin@62.171.145.58
+sudo chown -R deploy:deploy /opt/apps/el_contable
+sudo chmod -R u+rwX /opt/apps/el_contable
+sudo mkdir -p /opt/apps/el_contable/movements_files
+sudo chown deploy:deploy /opt/apps/el_contable/movements_files
+```
+
+Registrar el directorio como seguro para git (como usuario `deploy`):
+
+```bash
+ssh deploy@62.171.145.58
+git config --global --add safe.directory /opt/apps/el_contable
+```
+
+Verificar:
+
+```bash
+ssh deploy@62.171.145.58 'cd /opt/apps/el_contable && git status && git pull --ff-only origin main'
+```
+
+> **Por qué no basta con `safe.directory`:** esa opción solo silencia el aviso de
+> Git; no cambia los permisos del sistema de ficheros. Sin el `chown`, el
+> `git pull` sigue fallando al no poder escribir en `.git/FETCH_HEAD`.
+>
+> **Por qué no conviene re-clonar:** `rm -rf` sobre ficheros de `root` también
+> requiere `sudo`. El `chown` es menos destructivo: no toca el contenido del
+> repo ni el `.env.prod`.
+>
+> **Regla general:** el directorio de despliegue debe ser propiedad del usuario
+> que ejecuta el deploy, desde el primer `git clone`. Si se clona como `root`,
+> el ownership hay que corregirlo una vez.
+
 ---
 
 ## 4. Repo PÚBLICO (flujo mínimo)
@@ -450,12 +524,16 @@ Ruta: **Settings** → **Secrets and variables** → **Actions** → **Secrets**
 
 | Secret | Valor | Cómo obtenerlo |
 |--------|-------|----------------|
-| `VPS_HOST` | `192.168.56.10` | IP del VPS |
+| `VPS_HOST` | `62.171.145.58` | **IP pública** del VPS de producción |
 | `VPS_USER` | `deploy` | Usuario SSH del VPS |
 | `VPS_DEPLOY_KEY` | Clave privada `~/.ssh/vps_deploy` | Ver 6.2 |
 | `VPS_KNOWN_HOSTS` | Host keys del VPS | Ver 6.3 |
 | `VPS_GHCR_USERNAME` | `flaviooria` | Dueño del PAT |
 | `VPS_GHCR_TOKEN` | PAT clásico `read:packages` | Ver 6.4 |
+
+> ⚠️ `VPS_HOST` **no** puede ser una IP privada (`192.168.x.x`, `10.x.x.x`).
+> El runner de GitHub Actions está en Internet y no tiene ruta hacia tu LAN:
+> el job falla con `ssh: connect to host ... port 22: Connection timed out`.
 
 ### 6.2 `VPS_DEPLOY_KEY`
 
@@ -475,7 +553,7 @@ cat ~/.ssh/vps_deploy
 ### 6.3 `VPS_KNOWN_HOSTS`
 
 ```bash
-ssh-keyscan -p 22 192.168.56.10 > /tmp/vps_known_hosts 2>/dev/null
+ssh-keyscan -p 22 62.171.145.58 > /tmp/vps_known_hosts 2>/dev/null
 cat /tmp/vps_known_hosts
 ```
 
@@ -647,6 +725,9 @@ la imagen, por lo que el rollback es más lento pero reproducible.
 
 | Síntoma | Causa probable | Solución |
 |---------|----------------|----------|
+| `ssh: connect to host ... port 22: Connection timed out` | `VPS_HOST` es una **IP privada** (LAN/Vagrant) y el runner no tiene ruta | Usar la IP pública: `62.171.145.58` (sección 2) |
+| `detected dubious ownership in repository` | El repo es de `root` y el job corre como `deploy` | `chown -R deploy:deploy /opt/apps/el_contable` + `git config --global --add safe.directory <path>` |
+| `error: cannot open '.git/FETCH_HEAD': Permission denied` | El usuario no puede escribir en `.git` (ownership de `root`) | Mismo `chown` que el caso anterior |
 | `Permission denied (publickey)` en el `ssh` del runner | `VPS_DEPLOY_KEY` mal copiada (falta salto de línea) | Recopiar el secret desde `cat ~/.ssh/vps_deploy` |
 | `Host key verification failed` en el VPS | Falta `known_hosts` de github.com | `ssh-keyscan github.com >> ~/.ssh/known_hosts` |
 | `Permission denied (publickey)` en `git pull` | Repo privado sin deploy key | Sección 5 |

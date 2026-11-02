@@ -45,11 +45,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Prepare SSH
+        env:
+          VPS_DEPLOY_KEY: ${{ secrets.VPS_DEPLOY_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
         run: |
           mkdir -p ~/.ssh
-          printf '%s\n' '${{ secrets.VPS_DEPLOY_KEY }}' > ~/.ssh/id_ed25519
-          printf '%s\n' '${{ secrets.VPS_KNOWN_HOSTS }}' > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+          printf '%s\n' "$VPS_DEPLOY_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 700 ~/.ssh
+          chmod 600 ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Debug SSH authentication
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh -vvv \
+            -o IdentitiesOnly=yes \
+            -o ConnectTimeout=10 \
+            "$VPS_USER@$VPS_HOST" \
+            "whoami"
 
       - name: Deploy immutable SHA
         env:

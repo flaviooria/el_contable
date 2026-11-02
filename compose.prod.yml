@@ -1,0 +1,52 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: el_contable_db
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    networks:
+      - internal
+    expose:
+      - "5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: ghcr.io/${GHCR_OWNER:-flaviooria}/el-contable-api:${IMAGE_TAG:-latest}
+    container_name: el_contable_api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://$POSTGRES_USER:$POSTGRES_PASSWORD@db:5432/$POSTGRES_DB
+    expose:
+      - "8000"
+    networks:
+      - internal
+      - proxy
+    volumes:
+      - ./movements_files:/app/movements_files
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=proxy
+      - traefik.http.routers.el-contable-api.rule=Host(`api.${DOMAIN}`)
+      - traefik.http.routers.el-contable-api.entrypoints=websecure
+      - traefik.http.routers.el-contable-api.tls=true
+      - traefik.http.routers.el-contable-api.tls.certresolver=cf
+      - traefik.http.services.el-contable-api.loadbalancer.server.port=8000
+
+volumes:
+  postgres_data:
+
+networks:
+  proxy:
+    external: true
+  internal:
+    internal: true

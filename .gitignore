@@ -14,3 +14,8 @@ wheels/
 
 # Local test data
 movements_files/
+
+# Environment / deploy files
+.env
+.env.prod
+.env.deploy

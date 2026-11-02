@@ -13,6 +13,7 @@ permissions:
   packages: write
 
 env:
+  IMAGE_NAME: ghcr.io/flaviooria/el-contable-api
   IMAGE_TAG: ${{ github.event.inputs.image_tag || format('sha-{0}', github.sha) }}
 
 jobs:
@@ -29,16 +30,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Show image reference
+        run: |
+          echo "IMAGE_NAME=${{ env.IMAGE_NAME }}"
+          echo "IMAGE_TAG=${{ env.IMAGE_TAG }}"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - uses: docker/build-push-action@v7
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
           tags: |
-            ghcr.io/el-contable-api:${{ env.IMAGE_TAG }}
-            ghcr.io/el-contable-api:latest
+            ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+            ${{ env.IMAGE_NAME }}:latest
 
   deploy:
     needs: build
